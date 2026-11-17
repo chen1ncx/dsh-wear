@@ -27,6 +27,7 @@ import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
@@ -65,19 +66,47 @@ import java.util.concurrent.Executors;
 public class M3Activity extends Activity {
 
     // ------------------------------------------------------------ palette
-    // Material 3 dark tokens (Material You baseline).
-    static final int C_BG = 0xFF141218;        // surface
-    static final int C_CARD = 0xFF211F26;      // surface container
-    static final int C_CARD_HI = 0xFF2B2930;   // surface container high
-    static final int C_TEXT = 0xFFE6E0E9;      // on surface
-    static final int C_MUTED = 0xFFCAC4D0;     // on surface variant
-    static final int C_ACCENT = 0xFFD0BCFF;    // primary
-    static final int C_ON_ACCENT = 0xFF381E72;
-    static final int C_GREEN = 0xFFD0BCFF;     // primary (allow)
-    static final int C_RED = 0xFFF2B8B5;       // error
-    static final int C_ERR_BG = 0xFF8C1D18;    // error container
-    static final int C_BLUE = 0xFFEFB8C8;      // tertiary
-    static final int C_LINE = 0xFF49454F;      // outline
+    // Material 3 dark tokens; the accent set is switchable from the theme page.
+    int C_BG;
+    int C_CARD;
+    int C_CARD_HI;
+    int C_TEXT;
+    int C_MUTED;
+    int C_ACCENT;
+    int C_ON_ACCENT;
+    int C_GREEN;
+    int C_RED;
+    int C_ERR_BG;
+    int C_BLUE;
+    int C_LINE;
+
+    /** bg, card, cardHi, accent, onAccent, tertiary, error, errorBg */
+    static final int[][] THEMES = {
+            {0xFF141218, 0xFF211F26, 0xFF2B2930, 0xFFD0BCFF, 0xFF381E72, 0xFFEFB8C8, 0xFFF2B8B5, 0xFF8C1D18},
+            {0xFF101418, 0xFF1A2027, 0xFF232B34, 0xFFA8C7FA, 0xFF00325B, 0xFFB8E0FF, 0xFFF2B8B5, 0xFF8C1D18},
+            {0xFF0F1512, 0xFF1A211C, 0xFF232B25, 0xFFA8D5BA, 0xFF06331F, 0xFFB7E4D0, 0xFFF2B8B5, 0xFF8C1D18},
+            {0xFF16130E, 0xFF211C15, 0xFF2B251C, 0xFFF5C26B, 0xFF3B2E00, 0xFFDCC7A0, 0xFFF2B8B5, 0xFF8C1D18},
+            {0xFF171114, 0xFF241C21, 0xFF2E2429, 0xFFF2B8C6, 0xFF4A0F26, 0xFFF6D2DC, 0xFFF2B8B5, 0xFF8C1D18},
+            {0xFF0D1416, 0xFF162023, 0xFF1F2A2E, 0xFF9BD6E8, 0xFF00363F, 0xFFBFE6F0, 0xFFF2B8B5, 0xFF8C1D18},
+            {0xFF171210, 0xFF231B17, 0xFF2D231E, 0xFFF4B08A, 0xFF4A2200, 0xFFF0D2BE, 0xFFF2B8B5, 0xFF8C1D18},
+            {0xFF121316, 0xFF1C1D22, 0xFF26272D, 0xFFC7CBE0, 0xFF1F2333, 0xFFDDE1F5, 0xFFF2B8B5, 0xFF8C1D18},
+    };
+
+    void applyTheme(int index) {
+        int[] t = THEMES[Math.floorMod(index, THEMES.length)];
+        C_BG = t[0];
+        C_CARD = t[1];
+        C_CARD_HI = t[2];
+        C_ACCENT = t[3];
+        C_ON_ACCENT = t[4];
+        C_BLUE = t[5];
+        C_RED = t[6];
+        C_ERR_BG = t[7];
+        C_GREEN = C_ACCENT;
+        C_TEXT = 0xFFE6E0E9;
+        C_MUTED = 0xFFCAC4D0;
+        C_LINE = 0xFF49454F;
+    }
 
     static final String PREFS = "dshwatch";
     static final String TAG = "DSHWatch";
@@ -108,6 +137,19 @@ public class M3Activity extends Activity {
     LinearLayout screenPair;
     LinearLayout screenList;
     LinearLayout screenDetail;
+    Pager pager;
+    LinearLayout pagesBox;
+    FrameLayout pageExit;
+    FrameLayout conversation;
+    FrameLayout pagePair;
+    FrameLayout pageTheme;
+    int pageWidth;
+    int pageIndex = PAGE_TALK;
+
+    static final int PAGE_EXIT = 0;
+    static final int PAGE_TALK = 1;
+    static final int PAGE_PAIR = 2;
+    static final int PAGE_THEME = 3;
 
     ListView listView;
     SessionAdapter adapter;
@@ -140,15 +182,27 @@ public class M3Activity extends Activity {
             prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             baseUrl = prefs.getString("url", null);
             token = prefs.getString("token", null);
+            applyTheme(prefs.getInt("theme", 0));
 
             root = new FrameLayout(this);
             root.setBackgroundColor(C_BG);
             setContentView(root);
+            buildPager();
 
             applyLaunchConfig(getIntent());
             if (TextUtils.isEmpty(baseUrl)) baseUrl = readConfigUrl();
             Log.i(TAG, "onCreate token=" + (token != null) + " url=" + baseUrl);
-            if (TextUtils.isEmpty(token)) showPair(null); else showList();
+            if (TextUtils.isEmpty(token)) {
+                showPair(null);
+            } else {
+                showList();
+                pager.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        pager.go(PAGE_TALK);
+                    }
+                });
+            }
         } catch (Throwable err) {
             showFallback(err);
         }
@@ -290,7 +344,7 @@ public class M3Activity extends Activity {
                     lastPending = pending;
                 } catch (Exception ignored) {
                 }
-                if (root.getChildCount() == 0) {
+                if (conversation != null && conversation.getChildCount() == 0) {
                     if (selectedId == null) showList(); else showDetail();
                 } else if (showing(screenDetail)) {
                     showDetail();
@@ -414,6 +468,7 @@ public class M3Activity extends Activity {
                 prefs.edit().putString("url", baseUrl).putString("token", token).apply();
                 toast("配对成功");
                 showList();
+                if (pager != null) pager.go(PAGE_TALK);
                 scheduleTick(200);
             }
 
@@ -436,15 +491,88 @@ public class M3Activity extends Activity {
     }
 
     boolean showing(View view) {
-        return root.getChildCount() == 1 && root.getChildAt(0) == view;
+        return conversation != null && conversation.getChildCount() == 1
+                && conversation.getChildAt(0) == view;
     }
 
-    /** Show one screen without rebuilding it when it is already the visible one. */
+    /** Put the conversation content (list or detail) into the middle page. */
     void showScreen(View view) {
-        if (root.getChildCount() == 1 && root.getChildAt(0) == view) return;
-        Log.i(TAG, "screen " + view.getClass().getSimpleName() + " children=" + root.getChildCount());
-        root.removeAllViews();
-        frameAdd(view);
+        if (showing(view)) return;
+        conversation.removeAllViews();
+        conversation.addView(view, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    FrameLayout pagerPage() {
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(C_BG);
+        frame.setLayoutParams(new LinearLayout.LayoutParams(pageWidth, ViewGroup.LayoutParams.MATCH_PARENT));
+        return frame;
+    }
+
+    void buildPager() {
+        pageWidth = getResources().getDisplayMetrics().widthPixels;
+        pagesBox = new LinearLayout(this);
+        pagesBox.setOrientation(LinearLayout.HORIZONTAL);
+        pageExit = pagerPage();
+        conversation = pagerPage();
+        pagePair = pagerPage();
+        pageTheme = pagerPage();
+        pagesBox.addView(pageExit);
+        pagesBox.addView(conversation);
+        pagesBox.addView(pagePair);
+        pagesBox.addView(pageTheme);
+
+        pager = new Pager(this);
+        pager.addView(pagesBox, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(pager, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        buildThemePage();
+    }
+
+    /** Horizontal pager with page snapping; vertical scrolling stays with the children. */
+    class Pager extends HorizontalScrollView {
+        Pager(Context context) {
+            super(context);
+            setHorizontalScrollBarEnabled(false);
+            setOverScrollMode(OVER_SCROLL_NEVER);
+            setClipToPadding(false);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent ev) {
+            boolean handled = super.onTouchEvent(ev);
+            int action = ev.getActionMasked();
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) snap();
+            return handled;
+        }
+
+        void snap() {
+            int width = getWidth();
+            if (width <= 0) return;
+            int page = Math.round(getScrollX() / (float) width);
+            page = Math.max(0, Math.min(3, page));
+            smoothScrollTo(page * width, 0);
+            pageIndex = page;
+            onPageChanged(page);
+        }
+
+        void go(int page) {
+            pageIndex = page;
+            onPageChanged(page);
+            int width = getWidth();
+            if (width <= 0) {
+                post(new Runnable() {
+                    @Override
+                    public void run() {
+                        smoothScrollTo(page * getWidth(), 0);
+                    }
+                });
+                return;
+            }
+            smoothScrollTo(page * width, 0);
+        }
     }
 
     LinearLayout page() {
@@ -455,6 +583,11 @@ public class M3Activity extends Activity {
     }
 
     void showPair(String message) {
+        buildPairPage(message);
+        if (pager != null) pager.go(PAGE_PAIR);
+    }
+
+    void buildPairPage(String message) {
         if (screenPair == null) {
             screenPair = page();
             pairScroll = new ScrollView(this);
@@ -466,7 +599,10 @@ public class M3Activity extends Activity {
             screenPair.addView(pairScroll, weightV());
         }
         String typedUrl = pairUrl == null ? null : pairUrl.getText().toString().trim();
-        showScreen(screenPair);
+        if (pagePair.getChildCount() == 0) {
+            pagePair.addView(screenPair, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
         pairContent.removeAllViews();
 
         LinearLayout head = row();
@@ -551,9 +687,7 @@ public class M3Activity extends Activity {
         }
         selectedId = null;
         if (screenList == null) {
-            clearRoot();
             screenList = page();
-            frameAdd(screenList);
 
             LinearLayout head = row();
             head.setPadding(dp(10), dp(6), dp(8), dp(2));
@@ -629,9 +763,7 @@ public class M3Activity extends Activity {
             return;
         }
         if (screenDetail == null) {
-            clearRoot();
             screenDetail = page();
-            frameAdd(screenDetail);
 
             LinearLayout head = row();
             head.setPadding(dp(6), dp(6), dp(8), dp(2));
@@ -1026,6 +1158,11 @@ public class M3Activity extends Activity {
 
     /** The screen the system back gesture lands on instead of killing the app. */
     void showExit() {
+        buildExitPage();
+        if (pager != null) pager.go(PAGE_EXIT);
+    }
+
+    void buildExitPage() {
         if (screenExit == null) {
             screenExit = page();
             LinearLayout box = new LinearLayout(this);
@@ -1061,7 +1198,93 @@ public class M3Activity extends Activity {
 
             screenExit.addView(box, weightV());
         }
-        showScreen(screenExit);
+        if (pageExit.getChildCount() == 0) {
+            pageExit.addView(screenExit, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+    }
+
+    /** Side pages are built the first time they are reached. */
+    void onPageChanged(int page) {
+        if (page == PAGE_PAIR && pagePair.getChildCount() == 0) buildPairPage(null);
+        else if (page == PAGE_EXIT && pageExit.getChildCount() == 0) buildExitPage();
+    }
+
+    void buildThemePage() {
+        pageTheme.removeAllViews();
+        LinearLayout box = page();
+        box.setPadding(dp(16), dp(16), dp(16), dp(10));
+
+        box.addView(text("主题色", 18, C_TEXT, true), fullWidth());
+        TextView sub = text("点了立刻生效", 10, C_MUTED, false);
+        sub.setPadding(0, 0, 0, dp(6));
+        box.addView(sub, fullWidth());
+
+        int current = prefs.getInt("theme", 0);
+        for (int line = 0; line < 2; line += 1) {
+            LinearLayout row = row();
+            row.setGravity(Gravity.CENTER);
+            for (int col = 0; col < 4; col += 1) {
+                final int index = line * 4 + col;
+                View swatch = new View(this);
+                GradientDrawable shape = new GradientDrawable();
+                shape.setShape(GradientDrawable.OVAL);
+                shape.setColor(THEMES[index][3]);
+                if (index == current) shape.setStroke(dp(3), C_TEXT);
+                swatch.setBackground(shape);
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(30), dp(30));
+                params.setMargins(dp(4), dp(8), dp(4), dp(8));
+                swatch.setLayoutParams(params);
+                swatch.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        selectTheme(index);
+                    }
+                });
+                row.addView(swatch);
+            }
+            box.addView(row, fullWidth());
+        }
+        TextView hint = text("左滑退出 · 右滑配对 / 主题", 9, C_MUTED, false);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(10), 0, 0);
+        box.addView(hint, fullWidth());
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        pageTheme.addView(scroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    void selectTheme(int index) {
+        prefs.edit().putInt("theme", index).apply();
+        applyTheme(index);
+        root.setBackgroundColor(C_BG);
+        pageExit.setBackgroundColor(C_BG);
+        conversation.setBackgroundColor(C_BG);
+        pagePair.setBackgroundColor(C_BG);
+        pageTheme.setBackgroundColor(C_BG);
+
+        // Everything is rebuilt from the palette, so drop the cached views.
+        screenList = null;
+        screenDetail = null;
+        screenPair = null;
+        screenExit = null;
+        listStatus = null;
+        detailTitle = null;
+        policyChip = null;
+        pairUrl = null;
+        pairCode = null;
+        pairStatus = null;
+        pageExit.removeAllViews();
+        pagePair.removeAllViews();
+        conversation.removeAllViews();
+        buildThemePage();
+        pager.go(PAGE_THEME);
+        if (token == null) buildPairPage(null); else showList();
+        toast("换好了");
     }
 
     @Override
@@ -1069,78 +1292,21 @@ public class M3Activity extends Activity {
         goBack();
     }
 
-    /** One path for the back key and the right-swipe gesture. */
+    /** Back: leave any side page, then leave the detail, then open the exit page. */
     void goBack() {
-        // Back / right-swipe never closes the app by accident: it walks back to
-        // the list, and from the list it opens the exit screen.
-        if (root.getChildCount() == 1) {
-            View current = root.getChildAt(0);
-            if (current == screenExit) {
-                showList();
-                return;
-            }
-            if (current == screenDetail) {
-                selectedId = null;
-                showList();
-                refreshNow(true);
-                return;
-            }
-            if (current == screenPair) {
-                if (token != null) showList(); else showExit();
-                return;
-            }
+        if (pageIndex != PAGE_TALK) {
+            pager.go(PAGE_TALK);
+            if (token == null) showPair(null); else showList();
+            return;
         }
+        if (showing(screenDetail)) {
+            selectedId = null;
+            showList();
+            refreshNow(true);
+            return;
+        }
+        pager.go(PAGE_EXIT);
         showExit();
-    }
-
-    // -------------------------------------------------- 右滑返回（自己做）
-
-    private float downX;
-    private float downY;
-    private long downAt;
-    private boolean swipeFired;
-
-    /**
-     * ColorOS Watch does not turn a right swipe into a BACK key, so the gesture
-     * is recognised here instead: horizontal, rightward, short, and long enough
-     * to be intentional. Vertical scrolling is untouched.
-     */
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent event) {
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                downX = event.getRawX();
-                downY = event.getRawY();
-                downAt = SystemClock.uptimeMillis();
-                swipeFired = false;
-                break;
-            case MotionEvent.ACTION_MOVE: {
-                // Fire as soon as the gesture is unambiguous: the system's own
-                // gesture detector may steal the rest of the stream on CANCEL.
-                float dx = event.getRawX() - downX;
-                float dy = event.getRawY() - downY;
-                if (!swipeFired && dx > dp(60) && Math.abs(dy) < dp(55)
-                        && SystemClock.uptimeMillis() - downAt < 600) {
-                    swipeFired = true;
-                    goBack();
-                    return true;
-                }
-                break;
-            }
-            case MotionEvent.ACTION_UP: {
-                float dx = event.getRawX() - downX;
-                float dy = event.getRawY() - downY;
-                if (!swipeFired && dx > dp(60) && Math.abs(dy) < dp(55)
-                        && SystemClock.uptimeMillis() - downAt < 600) {
-                    goBack();
-                    return true;
-                }
-                break;
-            }
-            default:
-                break;
-        }
-        return super.dispatchTouchEvent(event);
     }
 
     // ============================================================== widgets
