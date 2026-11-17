@@ -803,7 +803,9 @@ public class MainActivity extends Activity {
         head.addView(text("配对 DSH", 13, C_ACCENT, true), weight(1));
         pairContent.addView(head, fullWidth());
 
-        pairUrl = edit(TextUtils.isEmpty(typedUrl) ? (baseUrl == null ? "http://" : baseUrl) : typedUrl);
+        // Empty on purpose: the last-used address is only a hint. Typing wins.
+        pairUrl = edit(typedUrl == null ? "" : typedUrl);
+        pairUrl.setHint(TextUtils.isEmpty(baseUrl) ? "http://服务器:8787" : baseUrl);
         pairUrl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         pairUrl.setSingleLine(true);
         pairUrl.setCursorVisible(false);
@@ -882,9 +884,13 @@ public class MainActivity extends Activity {
         if ("连接".equals(key)) {
             String url = pairUrl.getText().toString().trim();
             String code = pairCode.getText().toString().trim();
+            if (TextUtils.isEmpty(url)) {
+                // Nothing typed: fall back to the address this watch last used.
+                url = baseUrl == null ? "" : baseUrl;
+            }
             if (TextUtils.isEmpty(url) || code.length() < 4) {
                 pairStatus.setVisibility(View.VISIBLE);
-                pairStatus.setText("地址和配对码都要填");
+                pairStatus.setText(TextUtils.isEmpty(url) ? "先填服务器地址" : "配对码没填完");
                 return;
             }
             pairStatus.setVisibility(View.VISIBLE);
