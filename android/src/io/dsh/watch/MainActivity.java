@@ -978,16 +978,13 @@ public class MainActivity extends Activity {
             s.pending = item.optInt("pending", 0);
             if (s.archived) archived.add(s); else rows.add(s);
         }
-        // Archived sessions stay folded away behind one row.
+        // The header row stays above its group, open or closed.
         if (!archived.isEmpty()) {
-            if (showArchived) {
-                rows.addAll(archived);
-            } else {
-                Session toggle = new Session();
-                toggle.id = ARCHIVE_TOGGLE;
-                toggle.title = "已归档 · " + archived.size();
-                rows.add(toggle);
-            }
+            Session toggle = new Session();
+            toggle.id = ARCHIVE_TOGGLE;
+            toggle.title = "已归档 · " + archived.size();
+            rows.add(toggle);
+            if (showArchived) rows.addAll(archived);
         }
         if (adapter != null) adapter.notifyDataSetChanged();
         if (listStatus != null) {
