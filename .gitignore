@@ -1,0 +1,15 @@
+node_modules/
+npm-debug.log*
+
+# build output of the watch app
+android/build/
+android/keystore.jks
+android/*.apk
+dist/*.tar.gz
+dist/*.idsig
+
+# editor / OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/

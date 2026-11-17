@@ -1,0 +1,14 @@
+# dsh-watch-bridge bundle patch — inserts the watch bridge row.
+#
+# Override any key from the profile's own cordis.patch.yml with the same
+# `id: watch-bridge`.
+- insert:
+    - id: watch-bridge
+      name: 'dsh-watch-bridge'
+      config:
+        port: 8787
+        host: '0.0.0.0'
+        relayApprovals: true
+        relayQuestions: true
+        approvalWaitMs: 120000
+        logLevel: 'info'

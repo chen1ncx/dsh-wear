@@ -1,0 +1,30 @@
+{
+  "name": "dsh-watch-bridge",
+  "version": "0.2.0",
+  "description": "Small-screen (smartwatch) bridge for DeepSeek Harness: list sessions, read a conversation, answer approvals and questions, send a short message, stop a turn.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "dist",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "watch",
+    "wear",
+    "approval"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
