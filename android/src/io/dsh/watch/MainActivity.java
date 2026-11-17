@@ -177,6 +177,7 @@ public class MainActivity extends Activity {
     ListView listView;
     SessionAdapter adapter;
     final List<Session> rows = new ArrayList<>();
+    static final String ARCHIVE_TOGGLE = "#archive";
 
     ScrollView detailScroll;
     LinearLayout detailBox;
@@ -910,6 +911,8 @@ public class MainActivity extends Activity {
         if (current.length() < 6) pairCode.setText(current + key);
     }
 
+    boolean showArchived;
+
     void showList() {
         if (token == null) {
             showPair(null);
@@ -939,6 +942,11 @@ public class MainActivity extends Activity {
                 @Override
                 public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                     if (position < rows.size()) {
+                        if (ARCHIVE_TOGGLE.equals(rows.get(position).id)) {
+                            showArchived = !showArchived;
+                            bindSessions();
+                            return;
+                        }
                         selectedId = rows.get(position).id;
                         finishedUnseen.remove(selectedId);
                         cancelDoneNote();
@@ -957,6 +965,7 @@ public class MainActivity extends Activity {
 
     void bindSessions() {
         rows.clear();
+        List<Session> archived = new ArrayList<>();
         for (int i = 0; i < sessions.length(); i += 1) {
             JSONObject item = sessions.optJSONObject(i);
             if (item == null) continue;
@@ -965,8 +974,20 @@ public class MainActivity extends Activity {
             s.title = item.optString("title", s.id);
             s.running = item.optBoolean("running", false);
             s.live = item.optBoolean("live", false);
+            s.archived = item.optBoolean("archived", false);
             s.pending = item.optInt("pending", 0);
-            rows.add(s);
+            if (s.archived) archived.add(s); else rows.add(s);
+        }
+        // Archived sessions stay folded away behind one row.
+        if (!archived.isEmpty()) {
+            if (showArchived) {
+                rows.addAll(archived);
+            } else {
+                Session toggle = new Session();
+                toggle.id = ARCHIVE_TOGGLE;
+                toggle.title = "已归档 · " + archived.size();
+                rows.add(toggle);
+            }
         }
         if (adapter != null) adapter.notifyDataSetChanged();
         if (listStatus != null) {
@@ -1625,6 +1646,13 @@ public class MainActivity extends Activity {
             row.setBackground(bg(C_CARD, 24));
 
             Session s = rows.get(position);
+            if (ARCHIVE_TOGGLE.equals(s.id)) {
+                TextView label = text(s.title + (showArchived ? "  ▾" : "  ▸"), 11, C_MUTED, false);
+                label.setGravity(Gravity.CENTER);
+                label.setPadding(0, dp(4), 0, dp(4));
+                row.addView(label, weight(1));
+                return row;
+            }
             View dot = new View(MainActivity.this);
             int color = s.pending > 0 ? C_RED : s.running ? C_GREEN : C_LINE;
             dot.setBackground(round(color, 4));
@@ -1814,6 +1842,7 @@ public class MainActivity extends Activity {
         String title;
         boolean running;
         boolean live;
+        boolean archived;
         int pending;
     }
 
