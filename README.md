@@ -1,4 +1,10 @@
-# DSH wear
+# DSH on wear
+
+> **本项目由 AI 生成。** 从代码、界面到文档，全部由 AI 在对话中完成，人类只做了需求和验收。
+> 介意的话请先读代码再决定是否使用；它会把你的会话内容和审批权限交给一个手表 App，请务必看 [SECURITY.md](SECURITY.md)。
+>
+> **This project is AI-generated.** Code, UI and docs were written by an AI in conversation; the human only set requirements and reviewed the result. It hands a watch app your session content and approval rights — read [SECURITY.md](SECURITY.md) before using it.
+
 
 A wrist-sized client for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness):
 see what the agent is doing, approve permission prompts, answer its questions, and
@@ -122,7 +128,7 @@ adb connect 192.168.3.24:5555      # 手表的无线调试端口，第一次要�
 adb install -r dist/dsh-watch.apk
 ```
 
-OPPO Watch 2 需要在开发者选项里打开「USB 调试 / 无线调试」。装完桌面上叫 **DSH wear**。
+OPPO Watch 2 需要在开发者选项里打开「USB 调试 / 无线调试」。装完桌面上叫 **DSH on wear**。
 
 ### 配对（三种方式，任选）
 
