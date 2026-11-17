@@ -405,12 +405,14 @@ public class MainActivity extends Activity {
                 if (mySeq != seqCounter) return;
                 lastError = message;
                 if (status == 401) {
-                    // Only wipe the token this request actually carried: a stale
-                    // 401 from before a re-pairing must not undo the new token.
+                    // Keep the token: a 401 usually means this host revoked the
+                    // device, and wiping it would force a new pairing just to
+                    // switch back later.
                     if (usedToken == null || usedToken.equals(token)) {
+                        needsAuth = true;
                         token = null;
-                        prefs.edit().remove("token").apply();
-                        showPair("配对失效了，重新配一次");
+                        showPair("这台 DSH 不认这个 token 了，重新配对");
+                        pairUrl.setText(baseUrl == null ? PREFILL_URL : baseUrl);
                     }
                     return;
                 }
@@ -560,6 +562,7 @@ public class MainActivity extends Activity {
             public void onOk(JSONObject response) {
                 pairing = false;
                 token = response.optString("token", null);
+                needsAuth = false;
                 prefs.edit().putString("url", baseUrl).putString("token", token).apply();
                 // Record it before the naming dialog, so dismissing the dialog
                 // still leaves a usable entry in the switcher.
@@ -835,7 +838,9 @@ public class MainActivity extends Activity {
         // never echoed: this page ends up in screenshots.
         // Both ends of the address are prefilled; the cursor sits right after
         // "http://" so only the host has to be typed.
-        pairUrl = edit(TextUtils.isEmpty(typedUrl) ? PREFILL_URL : typedUrl);
+        pairUrl = edit(TextUtils.isEmpty(typedUrl)
+                ? (needsAuth && baseUrl != null ? baseUrl : PREFILL_URL)
+                : typedUrl);
         pairUrl.setHint("http://服务器:8787");
         pairUrl.setSelectAllOnFocus(false);
         pairUrl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
@@ -933,6 +938,7 @@ public class MainActivity extends Activity {
 
     boolean showArchived;
     String pendingDelete;
+    boolean needsAuth;
 
     void showList() {
         if (token == null) {
@@ -1512,7 +1518,8 @@ public class MainActivity extends Activity {
         Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(0x00000000));
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
             WindowManager.LayoutParams params = window.getAttributes();
             params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
             params.height = WindowManager.LayoutParams.WRAP_CONTENT;
