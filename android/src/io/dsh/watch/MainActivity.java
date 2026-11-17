@@ -2,9 +2,14 @@ package io.dsh.watch;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -54,6 +59,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -113,6 +122,11 @@ public class MainActivity extends Activity {
     }
 
     static final String PREFS = "dshwatch";
+    static final String CHANNEL_DONE = "done";
+    static final int NOTE_ID = 1001;
+    /** Sessions that finished a turn and were not opened since. */
+    final Set<String> finishedUnseen = new HashSet<>();
+    final Map<String, Boolean> runningBefore = new HashMap<>();
     static final String TAG = "DSHWatch";
     static final int POLL_MS = 4000;
 
@@ -343,7 +357,16 @@ public class MainActivity extends Activity {
                     int pending = 0;
                     for (int i = 0; i < sessions.length(); i += 1) {
                         JSONObject item = sessions.optJSONObject(i);
-                        if (item != null) pending += item.optInt("pending", 0);
+                        if (item == null) continue;
+                        pending += item.optInt("pending", 0);
+                        String sid = item.optString("id", "");
+                        boolean running = item.optBoolean("running", false);
+                        Boolean before = runningBefore.put(sid, running);
+                        if (before != null && before && !running) {
+                            // The turn ended while we were polling: badge it.
+                            finishedUnseen.add(sid);
+                            notifyDone(item.optString("title", sid));
+                        }
                     }
                     if (pending > lastPending) vibrate();
                     lastPending = pending;
@@ -376,6 +399,52 @@ public class MainActivity extends Activity {
                 }
             }
         });
+    }
+
+    void ensureChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null && nm.getNotificationChannel(CHANNEL_DONE) == null) {
+                NotificationChannel channel = new NotificationChannel(CHANNEL_DONE, "任务完成", NotificationManager.IMPORTANCE_DEFAULT);
+                channel.setShowBadge(true);
+                nm.createNotificationChannel(channel);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** A normal notification, so the launcher can show its unread dot. */
+    void notifyDone(String title) {
+        try {
+            ensureChannel();
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                    : PendingIntent.FLAG_UPDATE_CURRENT;
+            PendingIntent pending = PendingIntent.getActivity(this, 0, intent, flags);
+            Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    ? new Notification.Builder(this, CHANNEL_DONE)
+                    : new Notification.Builder(this);
+            builder.setSmallIcon(android.R.drawable.stat_notify_chat)
+                    .setContentTitle("任务完成")
+                    .setContentText(title)
+                    .setAutoCancel(true)
+                    .setContentIntent(pending);
+            nm.notify(NOTE_ID, builder.build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    void cancelDoneNote() {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(NOTE_ID);
+        } catch (Exception ignored) {
+        }
     }
 
     void vibrate() {
@@ -855,6 +924,8 @@ public class MainActivity extends Activity {
                 public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                     if (position < rows.size()) {
                         selectedId = rows.get(position).id;
+                        finishedUnseen.remove(selectedId);
+                        cancelDoneNote();
                         lastPending = -1;
                         state = null;
                         showDetail();
@@ -1546,6 +1617,15 @@ public class MainActivity extends Activity {
             title.setSingleLine(true);
             title.setEllipsize(TextUtils.TruncateAt.END);
             row.addView(title, weight(1));
+
+            if (finishedUnseen.contains(s.id)) {
+                View dot2 = new View(MainActivity.this);
+                GradientDrawable shape = new GradientDrawable();
+                shape.setShape(GradientDrawable.OVAL);
+                shape.setColor(0xFFE5484D);  // unread-style red, not the soft error tone
+                dot2.setBackground(shape);
+                row.addView(dot2, lp(dp(8), dp(8), 4, 0, 3, 0));
+            }
 
             if (s.pending > 0) {
                 TextView badge = text(String.valueOf(s.pending), 10, 0xFF131313, true);
