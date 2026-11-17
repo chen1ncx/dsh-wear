@@ -143,6 +143,7 @@ public class M3Activity extends Activity {
     FrameLayout conversation;
     FrameLayout pagePair;
     FrameLayout pageTheme;
+    LinearLayout indicator;
     int pageWidth;
     int pageIndex = PAGE_TALK;
 
@@ -478,6 +479,7 @@ public class M3Activity extends Activity {
                 if (silent) {
                     showPair(message);
                 } else {
+                    pairStatus.setVisibility(View.VISIBLE);
                     pairStatus.setText(message);
                 }
             }
@@ -506,6 +508,7 @@ public class M3Activity extends Activity {
     FrameLayout pagerPage() {
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(C_BG);
+        frame.setPadding(0, 0, 0, dp(18));
         frame.setLayoutParams(new LinearLayout.LayoutParams(pageWidth, ViewGroup.LayoutParams.MATCH_PARENT));
         return frame;
     }
@@ -529,6 +532,59 @@ public class M3Activity extends Activity {
         root.addView(pager, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         buildThemePage();
+        buildIndicator();
+    }
+
+    /** The little pill at the bottom: one dot per page, the current one stretched. */
+    void buildIndicator() {
+        if (indicator != null) root.removeView(indicator);
+        indicator = new LinearLayout(this);
+        indicator.setOrientation(LinearLayout.HORIZONTAL);
+        indicator.setGravity(Gravity.CENTER);
+        indicator.setPadding(dp(7), dp(4), dp(7), dp(4));
+        indicator.setClickable(false);
+        indicator.setFocusable(false);
+
+        // Liquid-glass shell: a translucent vertical sheen plus a hairline top
+        // edge reads as frosted glass over the dark UI without a solid plate.
+        GradientDrawable pill = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0x3DFFFFFF, 0x14FFFFFF});
+        pill.setCornerRadius(dp(14));
+        pill.setStroke(dp(1), 0x4DFFFFFF);
+        indicator.setBackground(pill);
+        indicator.setElevation(dp(4));
+
+        for (int i = 0; i < 4; i += 1) {
+            View dot = new View(this);
+            dot.setClickable(false);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(6), dp(6));
+            params.setMargins(dp(3), 0, dp(3), 0);
+            dot.setLayoutParams(params);
+            indicator.addView(dot);
+        }
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        params.bottomMargin = dp(5);
+        root.addView(indicator, params);
+        updateIndicator(pageIndex);
+    }
+
+    void updateIndicator(int page) {
+        if (indicator == null) return;
+        for (int i = 0; i < indicator.getChildCount(); i += 1) {
+            View dot = indicator.getChildAt(i);
+            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) dot.getLayoutParams();
+            boolean active = i == page;
+            GradientDrawable shape = new GradientDrawable();
+            shape.setCornerRadius(dp(3));
+            shape.setColor(active ? C_ACCENT : 0x80FFFFFF);
+            dot.setBackground(shape);
+            params.width = dp(active ? 16 : 6);
+            params.height = dp(6);
+            dot.setLayoutParams(params);
+        }
     }
 
     /** Horizontal pager with page snapping; vertical scrolling stays with the children. */
@@ -548,6 +604,13 @@ public class M3Activity extends Activity {
             return handled;
         }
 
+        @Override
+        protected void onScrollChanged(int left, int top, int oldLeft, int oldTop) {
+            super.onScrollChanged(left, top, oldLeft, oldTop);
+            int width = getWidth();
+            if (width > 0) updateIndicator(Math.max(0, Math.min(3, Math.round(left / (float) width))));
+        }
+
         void snap() {
             int width = getWidth();
             if (width <= 0) return;
@@ -555,11 +618,13 @@ public class M3Activity extends Activity {
             page = Math.max(0, Math.min(3, page));
             smoothScrollTo(page * width, 0);
             pageIndex = page;
+            updateIndicator(page);
             onPageChanged(page);
         }
 
         void go(int page) {
             pageIndex = page;
+            updateIndicator(page);
             onPageChanged(page);
             int width = getWidth();
             if (width <= 0) {
@@ -613,18 +678,19 @@ public class M3Activity extends Activity {
         pairUrl = edit(TextUtils.isEmpty(typedUrl) ? (baseUrl == null ? "http://" : baseUrl) : typedUrl);
         pairUrl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         pairUrl.setSingleLine(true);
-        pairContent.addView(pairUrl, lp(-1, dp(30), 8, 2, 8, 0));
+        pairContent.addView(pairUrl, lp(-1, dp(26), 8, 2, 8, 0));
 
         pairCode = edit("");
         pairCode.setHint("6 位配对码");
         pairCode.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         pairCode.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         pairCode.setGravity(Gravity.CENTER);
-        pairContent.addView(pairCode, lp(-1, dp(36), 8, 4, 8, 0));
+        pairContent.addView(pairCode, lp(-1, dp(30), 8, 4, 8, 0));
 
         pairStatus = text(message == null ? "在 DSH 对话里说「给我手表配对码」" : message, 10,
                 message == null ? C_MUTED : C_RED, false);
         pairStatus.setPadding(dp(10), 0, dp(10), dp(2));
+        pairStatus.setVisibility(message == null ? View.GONE : View.VISIBLE);
         pairContent.addView(pairStatus);
 
         String[][] keys = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"⌫", "0", "连接"}};
@@ -647,17 +713,13 @@ public class M3Activity extends Activity {
                         onKey(key);
                     }
                 });
-                keyRow.addView(button, lp(0, dp(30), 1, 0, 1, 0));
+                keyRow.addView(button, lp(0, dp(26), 1, 0, 1, 0));
                 ((LinearLayout.LayoutParams) button.getLayoutParams()).weight = 1;
             }
             pairContent.addView(keyRow, fullWidth());
         }
 
-        TextView hint = text("也可以用 adb 直接配对:\n"
-                + "am start -n io.dsh.watch/.MainActivity \\\n"
-                + "  --es url http://IP:8787 --es code 123456", 8, C_MUTED, false);
-        hint.setPadding(dp(8), dp(4), dp(8), dp(4));
-        pairContent.addView(hint);
+
     }
 
     void onKey(String key) {
@@ -670,9 +732,11 @@ public class M3Activity extends Activity {
             String url = pairUrl.getText().toString().trim();
             String code = pairCode.getText().toString().trim();
             if (TextUtils.isEmpty(url) || code.length() < 4) {
+                pairStatus.setVisibility(View.VISIBLE);
                 pairStatus.setText("地址和配对码都要填");
                 return;
             }
+            pairStatus.setVisibility(View.VISIBLE);
             pairStatus.setText("连接中…");
             pairWith(url, code, false);
             return;
@@ -1282,6 +1346,7 @@ public class M3Activity extends Activity {
         pagePair.removeAllViews();
         conversation.removeAllViews();
         buildThemePage();
+        buildIndicator();
         pager.go(PAGE_THEME);
         if (token == null) buildPairPage(null); else showList();
         toast("换好了");
