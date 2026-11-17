@@ -1,6 +1,7 @@
 package io.dsh.watch;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
@@ -22,6 +23,7 @@ import android.view.MotionEvent;
 import android.view.inputmethod.InputMethodManager;
 import android.view.VelocityTracker;
 import android.view.View;
+import android.view.Window;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.AdapterView;
@@ -1214,39 +1216,100 @@ public class MainActivity extends Activity {
     }
 
     void showSayDialog() {
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(8), dp(6), dp(8), dp(2));
-        final AlertDialog[] holder = new AlertDialog[1];
-        String[] quick = {"继续", "先停一下", "汇报一下进展", "重试一次"};
-        for (final String quickText : quick) {
-            Button b = smallButton(quickText, C_CARD);
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable card = new GradientDrawable();
+        card.setColor(C_CARD_HI);
+        card.setCornerRadius(dp(26));
+        content.setBackground(card);
+
+        TextView title = text("发给 DSH", 13, C_TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        content.addView(title, fullWidth());
+
+        String[] quick = {"继续", "先停一下", "汇报进展"};
+        for (final String q : quick) {
+            Button b = outlinePill(q);
             b.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    say(quickText);
-                    if (holder[0] != null) holder[0].dismiss();
+                    say(q);
+                    dialog.dismiss();
                 }
             });
-            box.addView(b, lp(-1, dp(32), 0, 1, 0, 1));
+            content.addView(b, lp(-1, dp(28), 0, 5, 0, 0));
         }
+
         final EditText input = edit("");
         input.setHint("自己写一句");
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        box.addView(input, lp(-1, dp(32), 0, 2, 0, 2));
-        holder[0] = new AlertDialog.Builder(this)
-                .setTitle("发给 DSH")
-                .setView(box)
-                .setNegativeButton("取消", null)
-                .setPositiveButton("发送", new android.content.DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(android.content.DialogInterface d, int which) {
-                        String text = input.getText().toString().trim();
-                        if (!text.isEmpty()) say(text);
-                    }
-                })
-                .create();
-        holder[0].show();
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        input.setSingleLine(true);
+        input.setCursorVisible(true);
+        input.setFocusableInTouchMode(true);
+        input.setShowSoftInputOnFocus(true);
+        GradientDrawable field = new GradientDrawable();
+        field.setColor(C_CARD);
+        field.setCornerRadius(dp(18));
+        field.setStroke(dp(1), C_LINE);
+        input.setBackground(field);
+        content.addView(input, lp(-1, dp(32), 0, 8, 0, 0));
+
+        LinearLayout actions = row();
+        Button cancel = smallButton("取消", C_RED);
+        cancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        actions.addView(cancel, weightH(30));
+
+        Button send = smallButton("发送", C_ACCENT);
+        send.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String text = input.getText().toString().trim();
+                if (!text.isEmpty()) say(text);
+                dialog.dismiss();
+            }
+        });
+        actions.addView(send, weightH(30));
+        content.addView(actions, lp(-1, -2, 0, 8, 0, 0));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    /** Tonal pill with a hairline outline: reads as a button on the dialog surface. */
+    Button outlinePill(String label) {
+        Button button = smallButton(label, C_CARD_HI);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(C_CARD);
+        shape.setCornerRadius(dp(20));
+        shape.setStroke(dp(1), C_LINE);
+        button.setBackground(shape);
+        return button;
     }
 
     void say(String text) {
