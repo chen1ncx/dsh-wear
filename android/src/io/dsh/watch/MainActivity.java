@@ -557,7 +557,7 @@ public class MainActivity extends Activity {
                     showPair(message);
                 } else {
                     pairStatus.setVisibility(View.VISIBLE);
-                    pairStatus.setText(message);
+                    pairStatus.setText(friendlyError(message));
                 }
             }
         });
@@ -852,6 +852,8 @@ public class MainActivity extends Activity {
         pairStatus = text(message == null ? "在 DSH 对话里说「给我手表配对码」" : message, 10,
                 message == null ? C_MUTED : C_RED, false);
         pairStatus.setPadding(dp(10), 0, dp(10), dp(2));
+        pairStatus.setMaxLines(3);
+        pairStatus.setEllipsize(TextUtils.TruncateAt.END);
         pairStatus.setVisibility(message == null ? View.GONE : View.VISIBLE);
         pairContent.addView(pairStatus);
 
@@ -1418,6 +1420,15 @@ public class MainActivity extends Activity {
                 toast("没发出去: " + message);
             }
         });
+    }
+
+    /** Turn a raw socket exception into one readable line. */
+    static String friendlyError(String message) {
+        String text = message == null ? "" : message;
+        if (text.contains("failed to connect") || text.contains("Timeout") || text.contains("ECONNREFUSED")) {
+            return "连不上服务器：检查地址、端口和网络";
+        }
+        return text.length() > 90 ? text.substring(0, 90) + "…" : text;
     }
 
     Callback simpleCallback(final String okText) {
