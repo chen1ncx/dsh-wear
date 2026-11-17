@@ -19,6 +19,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.inputmethod.InputMethodManager;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewGroup;
@@ -734,13 +735,36 @@ public class MainActivity extends Activity {
         pairUrl = edit(TextUtils.isEmpty(typedUrl) ? (baseUrl == null ? "http://" : baseUrl) : typedUrl);
         pairUrl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         pairUrl.setSingleLine(true);
+        pairUrl.setCursorVisible(false);
+        pairUrl.setShowSoftInputOnFocus(false);
+        pairUrl.setFocusableInTouchMode(false);
+        pairUrl.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                // Deliberate edit: long-press hands the field to the real keyboard.
+                pairUrl.setFocusableInTouchMode(true);
+                pairUrl.requestFocus();
+                pairUrl.setCursorVisible(true);
+                pairUrl.setShowSoftInputOnFocus(true);
+                InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null) imm.showSoftInput(pairUrl, InputMethodManager.SHOW_IMPLICIT);
+                return true;
+            }
+        });
         pairContent.addView(pairUrl, lp(-1, dp(26), 8, 2, 8, 0));
 
         pairCode = edit("");
         pairCode.setHint("6 位配对码");
-        pairCode.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         pairCode.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         pairCode.setGravity(Gravity.CENTER);
+        // Digits come from the on-screen keypad only: no IME, no blinking caret.
+        pairCode.setInputType(android.text.InputType.TYPE_NULL);
+        pairCode.setKeyListener(null);
+        pairCode.setFocusable(false);
+        pairCode.setFocusableInTouchMode(false);
+        pairCode.setCursorVisible(false);
+        pairCode.setLongClickable(false);
+        pairCode.setShowSoftInputOnFocus(false);
         pairContent.addView(pairCode, lp(-1, dp(30), 8, 4, 8, 0));
 
         pairStatus = text(message == null ? "在 DSH 对话里说「给我手表配对码」" : message, 10,
