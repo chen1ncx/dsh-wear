@@ -1444,6 +1444,7 @@ public class MainActivity extends Activity {
         }
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
 
         final LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -1517,7 +1518,23 @@ public class MainActivity extends Activity {
 
             @Override
             public void onErr(String message, int status) {
-                hint.setText(message);
+                list.removeAllViews();
+                list.addView(title, fullWidth());
+                String shown = (status == 404 || message.contains("not found"))
+                        ? "插件版本较旧：重启一次 DSH 引擎即可"
+                        : message;
+                TextView error = text(shown, 10, C_RED, false);
+                error.setGravity(Gravity.CENTER);
+                error.setPadding(0, dp(6), 0, dp(6));
+                list.addView(error, fullWidth());
+                Button close = smallButton("关闭", C_CARD);
+                close.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dialog.dismiss();
+                    }
+                });
+                list.addView(close, lp(-1, dp(30), 0, 8, 0, 0));
             }
         });
     }
