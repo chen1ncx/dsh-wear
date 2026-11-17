@@ -106,6 +106,7 @@ public class MainActivity extends Activity {
     };
 
     void applyTheme(int index) {
+        Log.i(TAG, "applyTheme " + index);
         int[] t = THEMES[Math.floorMod(index, THEMES.length)];
         C_BG = t[0];
         C_CARD = t[1];
@@ -119,9 +120,12 @@ public class MainActivity extends Activity {
         C_TEXT = 0xFFE6E0E9;
         C_MUTED = 0xFFCAC4D0;
         C_LINE = 0xFF49454F;
+        Log.i(TAG, "  bg=" + Integer.toHexString(C_BG) + " accent=" + Integer.toHexString(C_ACCENT));
     }
 
     static final String PREFS = "dshwatch";
+    static final int DEFAULT_PORT = 8787;
+    static final String PREFILL_URL = "http://x.x.x.x:8787";
     static final String CHANNEL_DONE = "done";
     static final int NOTE_ID = 1001;
     /** Sessions that finished a turn and were not opened since. */
@@ -781,6 +785,7 @@ public class MainActivity extends Activity {
     }
 
     void buildPairPage(String message) {
+        Log.i(TAG, "buildPairPage bg=" + Integer.toHexString(C_BG));
         if (screenPair == null) {
             screenPair = page();
             pairScroll = new ScrollView(this);
@@ -804,24 +809,28 @@ public class MainActivity extends Activity {
         pairContent.addView(head, fullWidth());
 
         // Empty on purpose: the last-used address is only a hint. Typing wins.
-        pairUrl = edit(typedUrl == null ? "" : typedUrl);
-        pairUrl.setHint(TextUtils.isEmpty(baseUrl) ? "http://服务器:8787" : baseUrl);
+        // Boilerplate is prefilled (typing "http://" on a watch is painful) and
+        // selected, so the first keystroke replaces it. The saved address is
+        // never echoed: this page ends up in screenshots.
+        // Both ends of the address are prefilled; the cursor sits right after
+        // "http://" so only the host has to be typed.
+        pairUrl = edit(TextUtils.isEmpty(typedUrl) ? PREFILL_URL : typedUrl);
+        pairUrl.setHint("http://服务器:8787");
+        pairUrl.setSelectAllOnFocus(false);
         pairUrl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         pairUrl.setSingleLine(true);
-        pairUrl.setCursorVisible(false);
-        pairUrl.setShowSoftInputOnFocus(false);
-        pairUrl.setFocusableInTouchMode(false);
-        pairUrl.setOnLongClickListener(new View.OnLongClickListener() {
+        // The address must stay typeable: normal focus, normal keyboard.
+        pairUrl.setCursorVisible(true);
+        pairUrl.setFocusableInTouchMode(true);
+        pairUrl.setShowSoftInputOnFocus(true);
+        pairUrl.setOnClickListener(new View.OnClickListener() {
             @Override
-            public boolean onLongClick(View v) {
-                // Deliberate edit: long-press hands the field to the real keyboard.
-                pairUrl.setFocusableInTouchMode(true);
+            public void onClick(View v) {
                 pairUrl.requestFocus();
-                pairUrl.setCursorVisible(true);
-                pairUrl.setShowSoftInputOnFocus(true);
+                // Select the host placeholder so the first keystroke replaces it.
+                if (PREFILL_URL.equals(pairUrl.getText().toString())) pairUrl.setSelection(7, 14);
                 InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
                 if (imm != null) imm.showSoftInput(pairUrl, InputMethodManager.SHOW_IMPLICIT);
-                return true;
             }
         });
         pairContent.addView(pairUrl, lp(-1, dp(26), 8, 2, 8, 0));
@@ -884,8 +893,8 @@ public class MainActivity extends Activity {
         if ("连接".equals(key)) {
             String url = pairUrl.getText().toString().trim();
             String code = pairCode.getText().toString().trim();
-            if (TextUtils.isEmpty(url)) {
-                // Nothing typed: fall back to the address this watch last used.
+            if (TextUtils.isEmpty(url) || hostMissing(url)) {
+                // Only the boilerplate is left: reuse the address this watch last used.
                 url = baseUrl == null ? "" : baseUrl;
             }
             if (TextUtils.isEmpty(url) || code.length() < 4) {
@@ -908,6 +917,7 @@ public class MainActivity extends Activity {
         }
         selectedId = null;
         if (screenList == null) {
+            Log.i(TAG, "buildList bg=" + Integer.toHexString(C_BG));
             screenList = page();
 
             LinearLayout head = row();
@@ -1535,6 +1545,7 @@ public class MainActivity extends Activity {
     }
 
     void selectTheme(int index) {
+        Log.i(TAG, "selectTheme " + index);
         prefs.edit().putInt("theme", index).apply();
         applyTheme(index);
         root.setBackgroundColor(C_BG);
@@ -1814,10 +1825,26 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** True when only the boilerplate is there: the host part is empty. */
+    static boolean hostMissing(String url) {
+        String out = url.trim();
+        int at = out.indexOf("://");
+        String rest = at >= 0 ? out.substring(at + 3) : out;
+        if (rest.startsWith(":")) rest = rest.substring(1);
+        int colon = rest.indexOf(":");
+        String host = colon >= 0 ? rest.substring(0, colon) : rest;
+        return host.isEmpty() || host.equals("x.x.x.x");
+    }
+
     static String normalize(String url) {
         String out = url.trim();
         if (!out.startsWith("http://") && !out.startsWith("https://")) out = "http://" + out;
         while (out.endsWith("/")) out = out.substring(0, out.length() - 1);
+        // Typing just "192.168.1.5" should be enough: fill in the default port.
+        String rest = out.substring(out.indexOf("://") + 3);
+        if (out.startsWith("http://") && !rest.contains(":") && !rest.contains("/")) {
+            out = out + ":" + DEFAULT_PORT;
+        }
         return out;
     }
 }

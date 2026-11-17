@@ -13,17 +13,21 @@ The pairing code is never rendered on a web page and never printed to the log:
 you ask the agent for it and it calls the `watch_pair_code` tool.
 
 ![会话列表](docs/shots/screen-talk.png)
-![配对页](docs/shots/screen-pair.png)
+![审批卡片](docs/shots/screen-approval.png)
 
 <br>
 
+![配对页](docs/shots/screen-pair.png)
 ![主题色](docs/shots/screen-theme.png)
+
+<br>
+
+![发给 DSH](docs/shots/screen-say.png)
 ![退出页](docs/shots/screen-exit.png)
 
 <sub>四页横滑：退出 ← 对话 → 配对 → 主题。底部玻璃胶囊显示当前页。</sub>
 
-![发给 DSH](docs/shots/screen-say.png)
-![任务完成红点](docs/shots/screen-done.png)
+![任务跑完的红点](docs/shots/screen-done.png)
 
 ## Quick start (English)
 
