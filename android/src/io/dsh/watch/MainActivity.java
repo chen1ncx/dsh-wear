@@ -932,6 +932,7 @@ public class MainActivity extends Activity {
     }
 
     boolean showArchived;
+    String pendingDelete;
 
     void showList() {
         if (token == null) {
@@ -1546,6 +1547,78 @@ public class MainActivity extends Activity {
         }
     }
 
+    void confirmForget(final String url, final Dialog parent) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(14), dp(16), dp(14));
+        GradientDrawable card = new GradientDrawable();
+        card.setColor(C_CARD_HI);
+        card.setCornerRadius(dp(26));
+        box.setBackground(card);
+
+        TextView title = text("删除这台 DSH？", 13, C_TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        box.addView(title, fullWidth());
+        TextView who = text(shortHost(url), 10, C_MUTED, false);
+        who.setGravity(Gravity.CENTER);
+        who.setPadding(0, dp(4), 0, dp(10));
+        box.addView(who, fullWidth());
+
+        LinearLayout actions = row();
+        Button cancel = smallButton("取消", C_CARD);
+        cancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        actions.addView(cancel, weightH(32));
+        Button remove = smallButton("删除", C_RED);
+        remove.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                forgetServer(url);
+                dialog.dismiss();
+                parent.dismiss();
+                showDevicesDialog();
+            }
+        });
+        actions.addView(remove, weightH(32));
+        box.addView(actions, lp(-1, -2, 0, 6, 0, 0));
+
+        dialog.setContentView(box);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.86f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    void forgetServer(String url) {
+        Log.i(TAG, "forget server " + url);
+        try {
+            JSONArray list = new JSONArray(serverList());
+            JSONArray next = new JSONArray();
+            for (int i = 0; i < list.length(); i += 1) {
+                JSONObject item = list.optJSONObject(i);
+                if (item == null) continue;
+                if (url.equals(item.optString("url", ""))) continue;
+                next.put(item);
+            }
+            prefs.edit().putString("servers", next.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
     void switchServer(String url, String token) {
         baseUrl = url;
         token = token;
@@ -1632,7 +1705,19 @@ public class MainActivity extends Activity {
             name.setSingleLine(true);
             name.setEllipsize(TextUtils.TruncateAt.MIDDLE);
             row.addView(name, weight(1));
-            if (!current) {
+            if (url.equals(pendingDelete)) {
+                Button drop = smallButton("删除", C_RED);
+                drop.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        forgetServer(url);
+                        pendingDelete = null;
+                        dialog.dismiss();
+                        showDevicesDialog();
+                    }
+                });
+                row.addView(drop, lp(dp(52), dp(26), 6, 0, 0, 0));
+            } else if (!current) {
                 Button use = outlinePill("切换");
                 use.setOnClickListener(new View.OnClickListener() {
                     @Override
@@ -1643,12 +1728,36 @@ public class MainActivity extends Activity {
                 });
                 row.addView(use, lp(dp(52), dp(26), 6, 0, 0, 0));
             }
+            row.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    if (current) {
+                        toast("当前连接不能删，先切到别的");
+                        return true;
+                    }
+                    Log.i(TAG, "long-press server " + url);
+                    pendingDelete = url;
+                    dialog.dismiss();
+                    showDevicesDialog();
+                    return true;
+                }
+            });
             list.addView(row, lp(-1, -2, 0, 5, 0, 0));
         }
-        Button close = smallButton("关闭", C_CARD);
+        TextView tip = text("长按可删除", 9, C_MUTED, false);
+        tip.setGravity(Gravity.CENTER);
+        tip.setPadding(0, dp(6), 0, 0);
+        list.addView(tip, fullWidth());
+        Button close = smallButton(pendingDelete == null ? "关闭" : "取消", C_CARD);
         close.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (pendingDelete != null) {
+                    pendingDelete = null;
+                    dialog.dismiss();
+                    showDevicesDialog();
+                    return;
+                }
                 dialog.dismiss();
             }
         });
