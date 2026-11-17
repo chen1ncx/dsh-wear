@@ -557,6 +557,10 @@ public class MainActivity extends Activity {
                 pairing = false;
                 token = response.optString("token", null);
                 prefs.edit().putString("url", baseUrl).putString("token", token).apply();
+                // Record it before the naming dialog, so dismissing the dialog
+                // still leaves a usable entry in the switcher.
+                rememberServer(baseUrl, token, "");
+                askServerName(baseUrl, token);
                 toast("配对成功");
                 showList();
                 if (pager != null) pager.go(PAGE_TALK);
@@ -1437,6 +1441,117 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    /** Ask for a label right after pairing; an empty name falls back to the address. */
+    void askServerName(final String url, final String token) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable card = new GradientDrawable();
+        card.setColor(C_CARD_HI);
+        card.setCornerRadius(dp(26));
+        box.setBackground(card);
+
+        TextView title = text("给这台 DSH 起个名字", 13, C_TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        box.addView(title, fullWidth());
+
+        TextView hint = text(shortHost(url), 9, C_MUTED, false);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(2), 0, dp(6));
+        box.addView(hint, fullWidth());
+
+        final EditText input = edit("");
+        input.setHint("如：家里的电脑 / 云服务器");
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        input.setSingleLine(true);
+        input.setFocusableInTouchMode(true);
+        input.setShowSoftInputOnFocus(true);
+        GradientDrawable field = new GradientDrawable();
+        field.setColor(C_CARD);
+        field.setCornerRadius(dp(18));
+        field.setStroke(dp(1), C_LINE);
+        input.setBackground(field);
+        box.addView(input, lp(-1, dp(32), 0, 4, 0, 0));
+
+        LinearLayout actions = row();
+        Button skip = smallButton("跳过", C_CARD);
+        skip.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                rememberServer(url, token, "");
+                dialog.dismiss();
+            }
+        });
+        actions.addView(skip, weightH(30));
+        Button save = smallButton("保存", C_ACCENT);
+        save.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                rememberServer(url, token, input.getText().toString().trim());
+                dialog.dismiss();
+            }
+        });
+        actions.addView(save, weightH(30));
+        box.addView(actions, lp(-1, -2, 0, 8, 0, 0));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    /** Known DSH hosts: [{url, token, name}], the current one included. */
+    String serverList() {
+        return prefs.getString("servers", "[]");
+    }
+
+    void rememberServer(String url, String token, String name) {
+        try {
+            JSONArray list = new JSONArray(serverList());
+            JSONArray next = new JSONArray();
+            for (int i = 0; i < list.length(); i += 1) {
+                JSONObject item = list.optJSONObject(i);
+                if (item == null) continue;
+                if (url.equals(item.optString("url", ""))) continue;
+                next.put(item);
+            }
+            JSONObject entry = new JSONObject();
+            entry.put("url", url);
+            entry.put("token", token);
+            entry.put("name", name);
+            next.put(entry);
+            prefs.edit().putString("servers", next.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    void switchServer(String url, String token) {
+        baseUrl = url;
+        token = token;
+        prefs.edit().putString("url", url).putString("token", token).apply();
+        selectedId = null;
+        state = null;
+        showList();
+        refreshNow(true);
+    }
+
     void showDevicesDialog() {
         if (token == null) {
             toast("先配对才能管理设备");
@@ -1478,65 +1593,72 @@ public class MainActivity extends Activity {
         }
         dialog.show();
 
-        api("GET", "/api/devices", null, new Callback() {
-            @Override
-            public void onOk(JSONObject body) {
-                list.removeAllViews();
-                list.addView(title, fullWidth());
-                JSONArray devices = body.optJSONArray("devices");
-                if (devices == null || devices.length() == 0) {
-                    list.addView(text("还没有设备", 10, C_MUTED, false), fullWidth());
-                } else {
-                    for (int i = 0; i < devices.length(); i += 1) {
-                        JSONObject item = devices.optJSONObject(i);
-                        if (item == null) continue;
-                        final String id = item.optString("id", "");
-                        boolean current = item.optBoolean("current", false);
-                        LinearLayout row = row();
-                        TextView name = text(item.optString("name", id) + (current ? "（本机）" : ""), 11, C_TEXT, current);
-                        row.addView(name, weight(1));
-                        Button revoke = outlinePill("撤销");
-                        revoke.setOnClickListener(new View.OnClickListener() {
-                            @Override
-                            public void onClick(View v) {
-                                revokeDevice(id, dialog);
-                            }
-                        });
-                        row.addView(revoke, lp(dp(56), dp(26), 6, 0, 0, 0));
-                        list.addView(row, lp(-1, -2, 0, 5, 0, 0));
-                    }
-                }
-                Button close = smallButton("关闭", C_CARD);
-                close.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        dialog.dismiss();
-                    }
-                });
-                list.addView(close, lp(-1, dp(30), 0, 10, 0, 0));
+        // Fill in synchronously: the list lives in SharedPreferences.
+        list.removeAllViews();
+        list.addView(title, fullWidth());
+        JSONArray servers;
+        try {
+            servers = new JSONArray(serverList());
+        } catch (Exception err) {
+            servers = new JSONArray();
+        }
+        boolean hasCurrent = false;
+        for (int i = 0; i < servers.length(); i += 1) {
+            JSONObject item = servers.optJSONObject(i);
+            if (item != null && baseUrl != null && baseUrl.equals(item.optString("url", ""))) hasCurrent = true;
+        }
+        if (!hasCurrent && baseUrl != null) {
+            JSONObject only = new JSONObject();
+            try {
+                only.put("url", baseUrl);
+                only.put("token", token == null ? "" : token);
+                only.put("name", "");
+                servers.put(only);
+            } catch (Exception ignored) {
             }
-
-            @Override
-            public void onErr(String message, int status) {
-                list.removeAllViews();
-                list.addView(title, fullWidth());
-                String shown = (status == 404 || message.contains("not found"))
-                        ? "插件版本较旧：重启一次 DSH 引擎即可"
-                        : message;
-                TextView error = text(shown, 10, C_RED, false);
-                error.setGravity(Gravity.CENTER);
-                error.setPadding(0, dp(6), 0, dp(6));
-                list.addView(error, fullWidth());
-                Button close = smallButton("关闭", C_CARD);
-                close.setOnClickListener(new View.OnClickListener() {
+        }
+        for (int i = 0; i < servers.length(); i += 1) {
+            final JSONObject item = servers.optJSONObject(i);
+            if (item == null) continue;
+            final String url = item.optString("url", "");
+            final String entryToken = item.optString("token", "");
+            boolean current = url.equals(baseUrl);
+            final LinearLayout row = row();
+            String label = item.optString("name", "");
+            if (label.isEmpty()) label = shortHost(url);
+            TextView name = text(label + (current ? "  ●" : ""), 10, current ? C_ACCENT : C_TEXT, current);
+            name.setSingleLine(true);
+            name.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            row.addView(name, weight(1));
+            if (!current) {
+                Button use = outlinePill("切换");
+                use.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        switchServer(url, entryToken);
                         dialog.dismiss();
                     }
                 });
-                list.addView(close, lp(-1, dp(30), 0, 8, 0, 0));
+                row.addView(use, lp(dp(52), dp(26), 6, 0, 0, 0));
+            }
+            list.addView(row, lp(-1, -2, 0, 5, 0, 0));
+        }
+        Button close = smallButton("关闭", C_CARD);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
             }
         });
+        list.addView(close, lp(-1, dp(30), 0, 10, 0, 0));
+    }
+
+    static String shortHost(String url) {
+        String out = url == null ? "" : url;
+        if (out.startsWith("http://")) out = out.substring(7);
+        if (out.startsWith("https://")) out = out.substring(8);
+        while (out.endsWith("/")) out = out.substring(0, out.length() - 1);
+        return out;
     }
 
     void revokeDevice(final String id, final Dialog dialog) {
