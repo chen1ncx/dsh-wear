@@ -89,6 +89,9 @@ public class MainActivity extends Activity {
     String lastError = "";
     long lastOkAt;
     boolean refreshing;
+    int seqCounter;
+    boolean screenExitReady;
+    LinearLayout screenExit;
     boolean pairing;
     boolean firstPaint = true;
 
@@ -244,13 +247,22 @@ public class MainActivity extends Activity {
     }
 
     void refreshNow() {
-        if (refreshing) return;
+        refreshNow(false);
+    }
+
+    void refreshNow(boolean force) {
+        // A poll already in flight must not stomp the session the user just
+        // tapped: every response is stamped and only the newest one renders.
+        if (refreshing && !force) return;
         refreshing = true;
-        final String sessionParam = selectedId == null ? "" : "&session=" + enc(selectedId);
+        final int mySeq = ++seqCounter;
+        final String wanted = selectedId;
+        final String sessionParam = wanted == null ? "" : "&session=" + enc(wanted);
         api("GET", "/api/state?limit=8" + sessionParam, null, new Callback() {
             @Override
             public void onOk(JSONObject body) {
                 refreshing = false;
+                if (mySeq != seqCounter) return;
                 state = body;
                 lastOkAt = System.currentTimeMillis();
                 lastError = "";
@@ -258,7 +270,11 @@ public class MainActivity extends Activity {
                     sessions = body.optJSONArray("sessions");
                     if (sessions == null) sessions = new JSONArray();
                     JSONObject session = body.optJSONObject("session");
-                    if (session != null && selectedId != null) selectedId = session.optString("id", selectedId);
+                    // Never adopt the server's auto-pick as the user's choice.
+                    if (session != null && selectedId != null
+                            && !selectedId.equals(session.optString("id", ""))) {
+                        state = null;
+                    }
                     int pending = 0;
                     for (int i = 0; i < sessions.length(); i += 1) {
                         JSONObject item = sessions.optJSONObject(i);
@@ -268,13 +284,21 @@ public class MainActivity extends Activity {
                     lastPending = pending;
                 } catch (Exception ignored) {
                 }
-                if (selectedId == null) showList(); else showDetail();
+                if (root.getChildCount() == 0) {
+                    if (selectedId == null) showList(); else showDetail();
+                } else if (showing(screenDetail)) {
+                    showDetail();
+                } else if (showing(screenList)) {
+                    showList();
+                }
+                // pairing / exit screens keep themselves; a poll never replaces them.
                 firstPaint = false;
             }
 
             @Override
             public void onErr(String message, int status) {
                 refreshing = false;
+                if (mySeq != seqCounter) return;
                 lastError = message;
                 if (status == 401) {
                     token = null;
@@ -403,6 +427,10 @@ public class MainActivity extends Activity {
 
     void clearRoot() {
         root.removeAllViews();
+    }
+
+    boolean showing(View view) {
+        return root.getChildCount() == 1 && root.getChildAt(0) == view;
     }
 
     /** Show one screen without rebuilding it when it is already the visible one. */
@@ -551,8 +579,9 @@ public class MainActivity extends Activity {
                     if (position < rows.size()) {
                         selectedId = rows.get(position).id;
                         lastPending = -1;
+                        state = null;
                         showDetail();
-                        refreshNow();
+                        refreshNow(true);
                     }
                 }
             });
@@ -607,6 +636,7 @@ public class MainActivity extends Activity {
                 public void onClick(View v) {
                     selectedId = null;
                     showList();
+                    refreshNow(true);
                 }
             });
             head.addView(back);
@@ -984,6 +1014,72 @@ public class MainActivity extends Activity {
                 toast("失败: " + message);
             }
         };
+    }
+
+    // ============================================================== 退出
+
+    /** The screen the system back gesture lands on instead of killing the app. */
+    void showExit() {
+        if (screenExit == null) {
+            screenExit = page();
+            LinearLayout box = new LinearLayout(this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setGravity(Gravity.CENTER_HORIZONTAL);
+            box.setPadding(dp(16), dp(28), dp(16), dp(12));
+
+            TextView title = text("DSH wear", 16, C_ACCENT, true);
+            title.setGravity(Gravity.CENTER);
+            box.addView(title, fullWidth());
+            TextView sub = text("要退出吗？", 10, C_MUTED, false);
+            sub.setGravity(Gravity.CENTER);
+            box.addView(sub, fullWidth());
+
+            Button stay = smallButton("继续使用", C_BLUE);
+            stay.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showList();
+                }
+            });
+            box.addView(stay, lp(-1, dp(38), 0, 18, 0, 0));
+
+            Button quit = smallButton("退出应用", C_RED);
+            quit.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    ui.removeCallbacks(ticker);
+                    finish();
+                }
+            });
+            box.addView(quit, lp(-1, dp(38), 0, 8, 0, 0));
+
+            screenExit.addView(box, weightV());
+        }
+        showScreen(screenExit);
+    }
+
+    @Override
+    public void onBackPressed() {
+        // Right-swipe / back never closes the app by accident: it walks back to
+        // the list, and from the list it opens the exit screen.
+        if (root.getChildCount() == 1) {
+            View current = root.getChildAt(0);
+            if (current == screenExit) {
+                showList();
+                return;
+            }
+            if (current == screenDetail) {
+                selectedId = null;
+                showList();
+                refreshNow(true);
+                return;
+            }
+            if (current == screenPair) {
+                if (token != null) showList(); else showExit();
+                return;
+            }
+        }
+        showExit();
     }
 
     // ============================================================== widgets
