@@ -482,7 +482,7 @@ public class MainActivity extends Activity {
         pairCode.setGravity(Gravity.CENTER);
         pairContent.addView(pairCode, lp(-1, dp(36), 8, 4, 8, 0));
 
-        pairStatus = text(message == null ? "在 DSH 的 /watch 页面看配对码" : message, 10,
+        pairStatus = text(message == null ? "在 DSH 对话里说「给我手表配对码」" : message, 10,
                 message == null ? C_MUTED : C_RED, false);
         pairStatus.setPadding(dp(10), 0, dp(10), dp(2));
         pairContent.addView(pairStatus);
