@@ -136,6 +136,7 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------- state
     SharedPreferences prefs;
+    String deviceId;
     String baseUrl;
     String token;
 
@@ -204,6 +205,11 @@ public class MainActivity extends Activity {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             getWindow().setBackgroundDrawable(new ColorDrawable(C_BG));
             prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            deviceId = prefs.getString("deviceId", null);
+            if (deviceId == null) {
+                deviceId = java.util.UUID.randomUUID().toString().substring(0, 8);
+                prefs.edit().putString("deviceId", deviceId).apply();
+            }
             baseUrl = prefs.getString("url", null);
             token = prefs.getString("token", null);
             applyTheme(prefs.getInt("theme", 0));
@@ -340,6 +346,7 @@ public class MainActivity extends Activity {
         if (refreshing && !force) return;
         refreshing = true;
         final int mySeq = ++seqCounter;
+        final String usedToken = token;
         final String wanted = selectedId;
         final String sessionParam = wanted == null ? "" : "&session=" + enc(wanted);
         api("GET", "/api/state?limit=8" + sessionParam, null, new Callback() {
@@ -394,9 +401,13 @@ public class MainActivity extends Activity {
                 if (mySeq != seqCounter) return;
                 lastError = message;
                 if (status == 401) {
-                    token = null;
-                    prefs.edit().remove("token").apply();
-                    showPair("配对失效了，重新配一次");
+                    // Only wipe the token this request actually carried: a stale
+                    // 401 from before a re-pairing must not undo the new token.
+                    if (usedToken == null || usedToken.equals(token)) {
+                        token = null;
+                        prefs.edit().remove("token").apply();
+                        showPair("配对失效了，重新配一次");
+                    }
                     return;
                 }
                 if (token != null) {
@@ -537,6 +548,7 @@ public class MainActivity extends Activity {
         try {
             body.put("code", code);
             body.put("name", "oppo-watch2");
+            if (deviceId != null) body.put("id", deviceId);
         } catch (Exception ignored) {
         }
         api("POST", "/api/pair", body, new Callback() {
@@ -929,6 +941,14 @@ public class MainActivity extends Activity {
             head.addView(title, weight(1));
             listStatus = text("", 9, C_MUTED, false);
             head.addView(listStatus);
+            Button devices = outlinePill("设备");
+            devices.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showDevicesDialog();
+                }
+            });
+            head.addView(devices, lp(dp(44), dp(24), 6, 0, 2, 0));
             screenList.addView(head, fullWidth());
 
             listView = new ListView(this);
@@ -1415,6 +1435,112 @@ public class MainActivity extends Activity {
         shape.setStroke(dp(1), C_LINE);
         button.setBackground(shape);
         return button;
+    }
+
+    void showDevicesDialog() {
+        if (token == null) {
+            toast("先配对才能管理设备");
+            return;
+        }
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        final LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable card = new GradientDrawable();
+        card.setColor(C_CARD_HI);
+        card.setCornerRadius(dp(26));
+        list.setBackground(card);
+
+        TextView title = text("已配对设备", 13, C_TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        list.addView(title, fullWidth());
+        final TextView hint = text("读取中…", 10, C_MUTED, false);
+        hint.setGravity(Gravity.CENTER);
+        list.addView(hint, fullWidth());
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(list, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+
+        api("GET", "/api/devices", null, new Callback() {
+            @Override
+            public void onOk(JSONObject body) {
+                list.removeAllViews();
+                list.addView(title, fullWidth());
+                JSONArray devices = body.optJSONArray("devices");
+                if (devices == null || devices.length() == 0) {
+                    list.addView(text("还没有设备", 10, C_MUTED, false), fullWidth());
+                } else {
+                    for (int i = 0; i < devices.length(); i += 1) {
+                        JSONObject item = devices.optJSONObject(i);
+                        if (item == null) continue;
+                        final String id = item.optString("id", "");
+                        boolean current = item.optBoolean("current", false);
+                        LinearLayout row = row();
+                        TextView name = text(item.optString("name", id) + (current ? "（本机）" : ""), 11, C_TEXT, current);
+                        row.addView(name, weight(1));
+                        Button revoke = outlinePill("撤销");
+                        revoke.setOnClickListener(new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                revokeDevice(id, dialog);
+                            }
+                        });
+                        row.addView(revoke, lp(dp(56), dp(26), 6, 0, 0, 0));
+                        list.addView(row, lp(-1, -2, 0, 5, 0, 0));
+                    }
+                }
+                Button close = smallButton("关闭", C_CARD);
+                close.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dialog.dismiss();
+                    }
+                });
+                list.addView(close, lp(-1, dp(30), 0, 10, 0, 0));
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                hint.setText(message);
+            }
+        });
+    }
+
+    void revokeDevice(final String id, final Dialog dialog) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("id", id);
+        } catch (Exception ignored) {
+        }
+        api("POST", "/api/devices/revoke", body, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                toast("已撤销");
+                dialog.dismiss();
+                showDevicesDialog();
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                toast("撤销失败: " + message);
+            }
+        });
     }
 
     void say(String text) {
