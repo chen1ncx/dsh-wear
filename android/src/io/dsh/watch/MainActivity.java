@@ -12,11 +12,13 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.Vibrator;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -1060,7 +1062,12 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        // Right-swipe / back never closes the app by accident: it walks back to
+        goBack();
+    }
+
+    /** One path for the back key and the right-swipe gesture. */
+    void goBack() {
+        // Back / right-swipe never closes the app by accident: it walks back to
         // the list, and from the list it opens the exit screen.
         if (root.getChildCount() == 1) {
             View current = root.getChildAt(0);
@@ -1080,6 +1087,56 @@ public class MainActivity extends Activity {
             }
         }
         showExit();
+    }
+
+    // -------------------------------------------------- 右滑返回（自己做）
+
+    private float downX;
+    private float downY;
+    private long downAt;
+    private boolean swipeFired;
+
+    /**
+     * ColorOS Watch does not turn a right swipe into a BACK key, so the gesture
+     * is recognised here instead: horizontal, rightward, short, and long enough
+     * to be intentional. Vertical scrolling is untouched.
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = event.getRawX();
+                downY = event.getRawY();
+                downAt = SystemClock.uptimeMillis();
+                swipeFired = false;
+                break;
+            case MotionEvent.ACTION_MOVE: {
+                // Fire as soon as the gesture is unambiguous: the system's own
+                // gesture detector may steal the rest of the stream on CANCEL.
+                float dx = event.getRawX() - downX;
+                float dy = event.getRawY() - downY;
+                if (!swipeFired && dx > dp(60) && Math.abs(dy) < dp(55)
+                        && SystemClock.uptimeMillis() - downAt < 600) {
+                    swipeFired = true;
+                    goBack();
+                    return true;
+                }
+                break;
+            }
+            case MotionEvent.ACTION_UP: {
+                float dx = event.getRawX() - downX;
+                float dy = event.getRawY() - downY;
+                if (!swipeFired && dx > dp(60) && Math.abs(dy) < dp(55)
+                        && SystemClock.uptimeMillis() - downAt < 600) {
+                    goBack();
+                    return true;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        return super.dispatchTouchEvent(event);
     }
 
     // ============================================================== widgets
