@@ -222,6 +222,10 @@ public class MainActivity extends Activity {
             applyLaunchConfig(getIntent());
             if (TextUtils.isEmpty(baseUrl)) baseUrl = readConfigUrl();
             Log.i(TAG, "onCreate token=" + (token != null) + " url=" + baseUrl);
+            if (!TextUtils.isEmpty(token) && !TextUtils.isEmpty(baseUrl)) {
+                // Heal the switcher list on every launch.
+                rememberServer(baseUrl, token, "");
+            }
             if (TextUtils.isEmpty(token)) {
                 showPair(null);
             } else {
@@ -1608,12 +1612,10 @@ public class MainActivity extends Activity {
             if (item != null && baseUrl != null && baseUrl.equals(item.optString("url", ""))) hasCurrent = true;
         }
         if (!hasCurrent && baseUrl != null) {
-            JSONObject only = new JSONObject();
+            // Persist it too, so switching away and back keeps both hosts.
+            rememberServer(baseUrl, token == null ? "" : token, "");
             try {
-                only.put("url", baseUrl);
-                only.put("token", token == null ? "" : token);
-                only.put("name", "");
-                servers.put(only);
+                servers = new JSONArray(serverList());
             } catch (Exception ignored) {
             }
         }
