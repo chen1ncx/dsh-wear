@@ -1628,10 +1628,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    void switchServer(String url, String token) {
+    void switchServer(String url, String newToken) {
         baseUrl = url;
-        token = token;
-        prefs.edit().putString("url", url).putString("token", token).apply();
+        // `token = token` used to shadow the field and keep the previous host's
+        // token, which made every switch a 401.
+        token = newToken;
+        prefs.edit().putString("url", url).putString("token", newToken).apply();
         selectedId = null;
         state = null;
         showList();
