@@ -1,2 +1,0 @@
-src/io/dsh/wear/m3/M3Activity.java
-build/gen/io/dsh/wear/m3/R.java
