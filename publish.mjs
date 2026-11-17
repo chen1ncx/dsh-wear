@@ -90,7 +90,11 @@ console.log('[3/5] 推送 main')
 const pushUrl = `https://x-access-token:${TOKEN}@github.com/${OWNER}/${REPO}.git`
 git(['branch', '-M', 'main'])
 git(['push', '--force', pushUrl, 'main'])
-git(['remote', 'remove', 'origin'], {})
+try {
+  git(['remote', 'remove', 'origin'])
+} catch {
+  // no origin yet
+}
 git(['remote', 'add', 'origin', `${htmlUrl}.git`])
 
 console.log(`[4/5] 创建 release ${tag}`)
