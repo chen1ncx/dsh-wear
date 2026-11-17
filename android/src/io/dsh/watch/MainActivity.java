@@ -1535,6 +1535,8 @@ public class MainActivity extends Activity {
     }
 
     void rememberServer(String url, String token, String name) {
+        // Never store a blank token: that would wipe the working one for this host.
+        if (url == null || url.isEmpty() || token == null || token.isEmpty()) return;
         try {
             JSONArray list = new JSONArray(serverList());
             JSONArray next = new JSONArray();
@@ -1547,7 +1549,7 @@ public class MainActivity extends Activity {
             JSONObject entry = new JSONObject();
             entry.put("url", url);
             entry.put("token", token);
-            entry.put("name", name);
+            entry.put("name", name == null ? "" : name);
             next.put(entry);
             prefs.edit().putString("servers", next.toString()).apply();
         } catch (Exception ignored) {
