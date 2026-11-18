@@ -663,12 +663,11 @@ public class MainActivity extends Activity {
         indicator.setClickable(false);
         indicator.setFocusable(false);
 
-        // A small solid capsule: the pages now run to the bottom edge, so the
-        // pill has to hide the row behind it instead of letting it show through.
+        // Transparent glass: the capsule is only a hint, the page shows through.
         GradientDrawable pill = new GradientDrawable();
-        pill.setColor(C_CARD_HI);
+        pill.setColor(0x1AFFFFFF);
         pill.setCornerRadius(dp(10));
-        pill.setStroke(dp(1), 0x33FFFFFF);
+        pill.setStroke(dp(1), 0x2EFFFFFF);
         indicator.setBackground(pill);
 
         for (int i = 0; i < 4; i += 1) {
@@ -2087,6 +2086,7 @@ public class MainActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     showList();
+                    if (pager != null) pager.go(PAGE_TALK);
                 }
             });
             box.addView(stay, lp(-1, dp(34), 0, 14, 0, 0));
