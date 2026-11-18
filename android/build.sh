@@ -28,11 +28,12 @@ echo "[2/6] resources"
   -o build/app.ap_ \
   -I "$SDK_JAR" \
   --manifest AndroidManifest.xml \
+  --auto-add-overlay \
   -R build/res.zip \
   --java build/gen \
   --min-sdk-version 21 \
   --target-sdk-version 27 \
-  --version-code 4 \
+  --version-code 5 \
   --version-name 0.1.0
 
 echo "[3/6] javac"

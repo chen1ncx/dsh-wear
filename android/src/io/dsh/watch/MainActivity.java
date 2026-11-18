@@ -15,6 +15,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -968,6 +969,11 @@ public class MainActivity extends Activity {
 
             listView = new ListView(this);
             listView.setDivider(null);
+            // The platform selector is a flat rectangle: it peeks out behind the
+            // rounded row cards as four coloured corners. Rows draw their own
+            // pressed state, so the selector is turned off entirely.
+            listView.setSelector(new ColorDrawable(0x00000000));
+            listView.setDrawSelectorOnTop(false);
             listView.setDividerHeight(dp(3));
             listView.setPadding(dp(6), dp(2), dp(6), 0);
             listView.setClipToPadding(false);
@@ -1337,22 +1343,69 @@ public class MainActivity extends Activity {
     }
 
     void confirmStop() {
-        new AlertDialog.Builder(this)
-                .setMessage("停止当前任务？")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("停止", new android.content.DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(android.content.DialogInterface dialog, int which) {
-                        JSONObject body = new JSONObject();
-                        try {
-                            body.put("session", selectedId);
-                        } catch (Exception ignored) {
-                        }
-                        api("POST", "/api/stop", body, simpleCallback("已停止"));
-                        toast("已停止");
-                    }
-                })
-                .show();
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable card = new GradientDrawable();
+        card.setColor(C_CARD_HI);
+        card.setCornerRadius(dp(26));
+        content.setBackground(card);
+
+        TextView title = text("停止当前任务？", 13, C_TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        content.addView(title, fullWidth());
+
+        TextView hint = text("这一轮会立刻中断，已经写下的内容还在", 9, C_MUTED, false);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(2), 0, dp(8));
+        content.addView(hint, fullWidth());
+
+        LinearLayout actions = row();
+        Button cancel = smallButton("取消", C_CARD);
+        cancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        actions.addView(cancel, weightH(30));
+        Button stop = smallButton("停止", C_RED);
+        stop.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                JSONObject body = new JSONObject();
+                try {
+                    body.put("session", selectedId);
+                } catch (Exception ignored) {
+                }
+                api("POST", "/api/stop", body, simpleCallback("已停止"));
+                toast("已停止");
+            }
+        });
+        actions.addView(stop, weightH(30));
+        content.addView(actions, lp(-1, -2, 0, 8, 0, 0));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.88f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
     }
 
     void showSayDialog() {
@@ -1880,8 +1933,7 @@ public class MainActivity extends Activity {
             quit.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    ui.removeCallbacks(ticker);
-                    finish();
+                    quitApp();
                 }
             });
             box.addView(quit, lp(-1, dp(38), 0, 8, 0, 0));
@@ -1985,6 +2037,13 @@ public class MainActivity extends Activity {
         goBack();
     }
 
+    /** Leave without the platform's activity zoom/fade. */
+    void quitApp() {
+        ui.removeCallbacks(ticker);
+        finish();
+        overridePendingTransition(0, 0);
+    }
+
     /** Back: leave any side page, then leave the detail, then open the exit page. */
     void goBack() {
         Log.i(TAG, "goBack page=" + pageIndex);
@@ -2027,7 +2086,7 @@ public class MainActivity extends Activity {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(dp(8), dp(7), dp(8), dp(7));
-            row.setBackground(bg(C_CARD, 24));
+            row.setBackground(rowState());
 
             Session s = rows.get(position);
             if (ARCHIVE_TOGGLE.equals(s.id)) {
@@ -2158,6 +2217,15 @@ public class MainActivity extends Activity {
 
     GradientDrawable round(int color, float radius) {
         return bg(color, radius);
+    }
+
+    /** Card that lightens while a finger is on it; no platform highlight. */
+    StateListDrawable rowState() {
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed}, bg(C_CARD_HI, 24));
+        states.addState(new int[]{android.R.attr.state_activated}, bg(C_CARD_HI, 24));
+        states.addState(new int[]{}, bg(C_CARD, 24));
+        return states;
     }
 
     LinearLayout row() {
