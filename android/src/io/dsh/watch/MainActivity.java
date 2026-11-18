@@ -974,7 +974,7 @@ public class MainActivity extends Activity {
             title.setEllipsize(TextUtils.TruncateAt.END);
             title.setPadding(0, 0, dp(4), 0);
             head.addView(title, weight(1));
-            listStatus = text("", 9, C_MUTED, false);
+            listStatus = text("", 8, C_MUTED, false);
             head.addView(listStatus);
             Button plus = outlinePill("＋");
             plus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
@@ -1088,7 +1088,7 @@ public class MainActivity extends Activity {
             } else {
                 int waiting = 0;
                 for (Session s : rows) waiting += s.pending;
-                listStatus.setText(waiting > 0 ? waiting + " 条待确认" : (lastError.isEmpty() ? "在线" : "离线"));
+                listStatus.setText(waiting > 0 ? "待确认 " + waiting : (lastError.isEmpty() ? "在线" : "离线"));
                 listStatus.setTextColor(waiting > 0 ? C_RED : (lastError.isEmpty() ? C_MUTED : C_RED));
             }
         }
@@ -1141,7 +1141,7 @@ public class MainActivity extends Activity {
             screenDetail.addView(detailScroll, weightV());
 
             detailActions = row();
-            detailActions.setPadding(dp(6), dp(2), dp(6), dp(6));
+            detailActions.setPadding(dp(6), dp(2), dp(6), dp(18));
             screenDetail.addView(detailActions, fullWidth());
         }
         showScreen(screenDetail);
@@ -2150,7 +2150,7 @@ public class MainActivity extends Activity {
             }
             box.addView(row, fullWidth());
         }
-        TextView hint = text("左滑退出 · 右滑配对 / 主题", 9, C_MUTED, false);
+        TextView hint = text("右滑退出 · 左滑配对 / 主题", 9, C_MUTED, false);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(0, dp(10), 0, 0);
         box.addView(hint, fullWidth());
