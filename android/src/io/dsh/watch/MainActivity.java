@@ -249,7 +249,7 @@ public class MainActivity extends Activity {
         try {
             StringWriter buffer = new StringWriter();
             err.printStackTrace(new PrintWriter(buffer));
-            String text = "DSH wear 启动失败\n\n" + buffer.toString();
+            String text = "DSH on wear 启动失败\n\n" + buffer.toString();
             Log.e(TAG, text);
             TextView view = new TextView(this);
             view.setText(text);
@@ -969,7 +969,7 @@ public class MainActivity extends Activity {
 
             LinearLayout head = row();
             head.setPadding(dp(10), dp(6), dp(8), dp(2));
-            TextView title = text("DSH wear", 12, C_ACCENT, true);
+            TextView title = text("DSH on wear", 11, C_ACCENT, true);
             head.addView(title, weight(1));
             listStatus = text("", 9, C_MUTED, false);
             head.addView(listStatus);
@@ -2062,11 +2062,20 @@ public class MainActivity extends Activity {
             box.setGravity(Gravity.CENTER_HORIZONTAL);
             box.setPadding(dp(16), dp(28), dp(16), dp(12));
 
-            TextView title = text("DSH wear", 16, C_ACCENT, true);
+            TextView title = text("DSH on wear", 16, C_ACCENT, true);
             title.setGravity(Gravity.CENTER);
             box.addView(title, fullWidth());
+            TextView tagline = text("在手表上查看您的电脑端的 DSH", 10, C_TEXT, false);
+            tagline.setGravity(Gravity.CENTER);
+            tagline.setPadding(0, dp(4), 0, 0);
+            box.addView(tagline, fullWidth());
+            TextView compat = text("兼容 DSH Go", 9, C_MUTED, false);
+            compat.setGravity(Gravity.CENTER);
+            compat.setPadding(0, dp(1), 0, 0);
+            box.addView(compat, fullWidth());
             TextView sub = text("要退出吗？", 10, C_MUTED, false);
             sub.setGravity(Gravity.CENTER);
+            sub.setPadding(0, dp(8), 0, 0);
             box.addView(sub, fullWidth());
 
             Button stay = smallButton("继续使用", C_BLUE);
