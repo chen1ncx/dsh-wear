@@ -11,6 +11,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -197,6 +198,21 @@ public class MainActivity extends Activity {
     TextView listStatus;
 
     // ============================================================ lifecycle
+
+    /**
+     * Render at a fixed 240dpi at most. The watch ROM lets the user force a
+     * smaller/larger density system-wide; the app's layout is tuned for a
+     * compact screen and must not swell to 320dpi.
+     */
+    @Override
+    protected void attachBaseContext(Context base) {
+        Configuration override = new Configuration();
+        override.setTo(base.getResources().getConfiguration());
+        if (override.densityDpi > 288) override.densityDpi = 288;
+        override.fontScale = Math.min(1f, override.fontScale);
+        applyOverrideConfiguration(override);
+        super.attachBaseContext(base);
+    }
 
     @Override
     protected void onCreate(Bundle bundle) {
@@ -969,19 +985,22 @@ public class MainActivity extends Activity {
 
             LinearLayout head = row();
             head.setPadding(dp(10), dp(6), dp(8), dp(2));
-            TextView title = text("DSH on wear", 11, C_ACCENT, true);
+            TextView title = text("DSH on wear", 10, C_ACCENT, true);
+            title.setSingleLine(true);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            title.setPadding(0, 0, dp(4), 0);
             head.addView(title, weight(1));
             listStatus = text("", 9, C_MUTED, false);
             head.addView(listStatus);
             Button plus = outlinePill("＋");
-            plus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            plus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             plus.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     createSession();
                 }
             });
-            head.addView(plus, lp(dp(32), dp(24), 6, 0, 0, 0));
+            head.addView(plus, lp(dp(26), dp(20), 6, 0, 0, 0));
             Button devices = outlinePill("设备");
             devices.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -989,7 +1008,7 @@ public class MainActivity extends Activity {
                     showDevicesDialog();
                 }
             });
-            head.addView(devices, lp(dp(44), dp(24), 6, 0, 2, 0));
+            head.addView(devices, lp(dp(36), dp(20), 6, 0, 2, 0));
             screenList.addView(head, fullWidth());
 
             listView = new ListView(this);
@@ -2060,22 +2079,22 @@ public class MainActivity extends Activity {
             LinearLayout box = new LinearLayout(this);
             box.setOrientation(LinearLayout.VERTICAL);
             box.setGravity(Gravity.CENTER_HORIZONTAL);
-            box.setPadding(dp(16), dp(28), dp(16), dp(12));
+            box.setPadding(dp(16), dp(14), dp(16), dp(8));
 
-            TextView title = text("DSH on wear", 16, C_ACCENT, true);
+            TextView title = text("DSH on wear", 15, C_ACCENT, true);
             title.setGravity(Gravity.CENTER);
             box.addView(title, fullWidth());
-            TextView tagline = text("在手表上查看您的电脑端的 DSH", 10, C_TEXT, false);
+            TextView tagline = text("在手表上查看您的电脑端的 DSH", 9, C_TEXT, false);
             tagline.setGravity(Gravity.CENTER);
-            tagline.setPadding(0, dp(4), 0, 0);
+            tagline.setPadding(0, dp(3), 0, 0);
             box.addView(tagline, fullWidth());
-            TextView compat = text("兼容 DSH Go", 9, C_MUTED, false);
+            TextView compat = text("兼容 DSH Go", 8, C_MUTED, false);
             compat.setGravity(Gravity.CENTER);
             compat.setPadding(0, dp(1), 0, 0);
             box.addView(compat, fullWidth());
-            TextView sub = text("要退出吗？", 10, C_MUTED, false);
+            TextView sub = text("要退出吗？", 9, C_MUTED, false);
             sub.setGravity(Gravity.CENTER);
-            sub.setPadding(0, dp(8), 0, 0);
+            sub.setPadding(0, dp(6), 0, 0);
             box.addView(sub, fullWidth());
 
             Button stay = smallButton("继续使用", C_BLUE);
@@ -2085,7 +2104,7 @@ public class MainActivity extends Activity {
                     showList();
                 }
             });
-            box.addView(stay, lp(-1, dp(38), 0, 18, 0, 0));
+            box.addView(stay, lp(-1, dp(30), 0, 12, 0, 0));
 
             Button quit = smallButton("退出应用", C_RED);
             quit.setOnClickListener(new View.OnClickListener() {
@@ -2094,7 +2113,7 @@ public class MainActivity extends Activity {
                     quitApp();
                 }
             });
-            box.addView(quit, lp(-1, dp(38), 0, 8, 0, 0));
+            box.addView(quit, lp(-1, dp(30), 0, 6, 0, 0));
 
             screenExit.addView(box, weightV());
         }
@@ -2342,7 +2361,7 @@ public class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(label);
         button.setAllCaps(false);
-        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         button.setTextColor(filledPrimary ? C_ON_ACCENT : danger ? 0xFFFFDAD6 : C_TEXT);
         button.setPadding(0, 0, 0, 0);
         button.setMinHeight(0);
