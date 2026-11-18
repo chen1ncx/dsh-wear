@@ -33,8 +33,8 @@ echo "[2/6] resources"
   --java build/gen \
   --min-sdk-version 21 \
   --target-sdk-version 27 \
-  --version-code 9 \
-  --version-name 0.1.0
+  --version-code 10 \
+  --version-name 0.2
 
 echo "[3/6] javac"
 find src build/gen -name '*.java' > build/sources.txt
