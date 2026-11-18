@@ -152,6 +152,7 @@ public class MainActivity extends Activity {
     boolean screenExitReady;
     LinearLayout screenExit;
     boolean pairing;
+    int pairSeq;
     boolean firstPaint = true;
 
     final Handler ui = new Handler(Looper.getMainLooper());
@@ -551,6 +552,7 @@ public class MainActivity extends Activity {
     void pairWith(String url, String code, boolean silent) {
         baseUrl = normalize(url);
         pairing = true;
+        final int attempt = ++pairSeq;
         JSONObject body = new JSONObject();
         try {
             body.put("code", code);
@@ -586,6 +588,19 @@ public class MainActivity extends Activity {
                 }
             }
         });
+        // The socket can hang without ever calling back; never leave the page
+        // sitting on 连接中… forever.
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!pairing || attempt != pairSeq) return;
+                pairing = false;
+                if (pairStatus != null && !silent) {
+                    pairStatus.setVisibility(View.VISIBLE);
+                    pairStatus.setText("没连上，检查地址和端口");
+                }
+            }
+        }, 12000);
     }
 
     // ============================================================== screens
