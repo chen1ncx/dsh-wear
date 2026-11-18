@@ -972,6 +972,15 @@ public class MainActivity extends Activity {
             head.addView(title, weight(1));
             listStatus = text("", 9, C_MUTED, false);
             head.addView(listStatus);
+            Button plus = outlinePill("＋");
+            plus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            plus.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    createSession();
+                }
+            });
+            head.addView(plus, lp(dp(32), dp(24), 6, 0, 0, 0));
             Button devices = outlinePill("设备");
             devices.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -1011,6 +1020,16 @@ public class MainActivity extends Activity {
                         showDetail();
                         refreshNow(true);
                     }
+                }
+            });
+            listView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+                @Override
+                public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+                    if (position >= rows.size()) return false;
+                    Session s = rows.get(position);
+                    if (ARCHIVE_TOGGLE.equals(s.id)) return false;
+                    confirmDelete(s);
+                    return true;
                 }
             });
             screenList.addView(listView, weightV());
@@ -1119,16 +1138,11 @@ public class MainActivity extends Activity {
             return;
         }
         detailTitle.setText(session.optString("title", "会话"));
-        String policy = session.isNull("policy") ? null : session.optString("policy", null);
+        boolean auto = session.optBoolean("auto", false);
         if (policyChip != null) {
-            if (policy == null) {
-                policyChip.setVisibility(View.GONE);
-            } else {
-                policyChip.setVisibility(View.VISIBLE);
-                boolean ask = "ask".equals(policy);
-                policyChip.setText(ask ? "审批 开" : "审批 关");
-                policyChip.setTextColor(ask ? C_GREEN : C_RED);
-            }
+            policyChip.setVisibility(View.VISIBLE);
+            policyChip.setText(auto ? "自动通过" : "审批 问");
+            policyChip.setTextColor(auto ? C_RED : C_GREEN);
         }
         int scrollY = detailScroll.getScrollY();
         int oldHeight = detailBox.getHeight();
@@ -1310,22 +1324,34 @@ public class MainActivity extends Activity {
     }
 
     void togglePolicy() {
-        if (state == null) return;
+        if (state == null || selectedId == null) return;
         JSONObject session = state.optJSONObject("session");
         if (session == null) return;
-        String policy = session.optString("policy", "ask");
-        final String target = "ask".equals(policy) ? "never" : "ask";
+        if (session.optBoolean("auto", false)) {
+            setAuto(false);
+            return;
+        }
+        destructiveConfirm("自动通过审批？", "删文件、跑命令都不再逐条问你", "打开", new Runnable() {
+            @Override
+            public void run() {
+                setAuto(true);
+            }
+        });
+    }
+
+    /** The watch answers this session's approvals with 允许 until it is turned off. */
+    void setAuto(final boolean on) {
         JSONObject body = new JSONObject();
         try {
             body.put("session", selectedId);
-            body.put("policy", target);
+            body.put("on", on);
         } catch (Exception ignored) {
         }
-        api("POST", "/api/policy", body, new Callback() {
+        api("POST", "/api/auto", body, new Callback() {
             @Override
             public void onOk(JSONObject response) {
-                toast("审批已" + ("ask".equals(target) ? "打开" : "关闭"));
-                refreshNow();
+                toast(on ? "审批：自动通过" : "审批：逐条问");
+                refreshNow(true);
             }
 
             @Override
@@ -1358,6 +1384,93 @@ public class MainActivity extends Activity {
     }
 
     void confirmStop() {
+        destructiveConfirm("停止当前任务？", "这一轮会立刻中断，已经写下的内容还在", "停止", new Runnable() {
+            @Override
+            public void run() {
+                JSONObject body = new JSONObject();
+                try {
+                    body.put("session", selectedId);
+                } catch (Exception ignored) {
+                }
+                api("POST", "/api/stop", body, simpleCallback("已停止"));
+                toast("已停止");
+            }
+        });
+    }
+
+    /** Delete is permanent, so it always goes through this card first. */
+    void confirmDelete(final Session target) {
+        String hint = target.title == null || target.title.isEmpty() ? "从这个列表里删掉" : target.title;
+        destructiveConfirm("删除这个对话？", hint + " · 删了不能恢复", "删除", new Runnable() {
+            @Override
+            public void run() {
+                JSONObject body = new JSONObject();
+                try {
+                    body.put("session", target.id);
+                } catch (Exception ignored) {
+                }
+                api("POST", "/api/delete", body, new Callback() {
+                    @Override
+                    public void onOk(JSONObject response) {
+                        finishedUnseen.remove(target.id);
+                        if (target.id.equals(selectedId)) selectedId = null;
+                        toast("已删除");
+                        showList();
+                        refreshNow(true);
+                    }
+
+                    @Override
+                    public void onErr(String message, int status) {
+                        toast(message);
+                    }
+                });
+            }
+        });
+    }
+
+    /** A new empty conversation in the same directory as the one being looked at. */
+    void createSession() {
+        JSONObject body = new JSONObject();
+        try {
+            String cwd = "";
+            for (int i = 0; i < sessions.length() && cwd.isEmpty(); i += 1) {
+                JSONObject item = sessions.optJSONObject(i);
+                if (item == null) continue;
+                if (selectedId != null && selectedId.equals(item.optString("id", ""))) {
+                    cwd = item.optString("cwd", "");
+                }
+            }
+            for (int i = 0; i < sessions.length() && cwd.isEmpty(); i += 1) {
+                JSONObject item = sessions.optJSONObject(i);
+                if (item != null && !item.optString("cwd", "").isEmpty()) cwd = item.optString("cwd", "");
+            }
+            if (!cwd.isEmpty()) body.put("cwd", cwd);
+        } catch (Exception ignored) {
+        }
+        toast("新建中…");
+        api("POST", "/api/new", body, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                String id = response.optString("session", "");
+                if (id.isEmpty()) {
+                    toast("没建起来");
+                    return;
+                }
+                selectedId = id;
+                state = null;
+                showDetail();
+                refreshNow(true);
+                toast("新对话");
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                toast("建不了: " + message);
+            }
+        });
+    }
+
+    void destructiveConfirm(String titleText, String hintText, String okLabel, final Runnable action) {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
@@ -1370,11 +1483,11 @@ public class MainActivity extends Activity {
         card.setCornerRadius(dp(26));
         content.setBackground(card);
 
-        TextView title = text("停止当前任务？", 13, C_TEXT, true);
+        TextView title = text(titleText, 13, C_TEXT, true);
         title.setGravity(Gravity.CENTER);
         content.addView(title, fullWidth());
 
-        TextView hint = text("这一轮会立刻中断，已经写下的内容还在", 9, C_MUTED, false);
+        TextView hint = text(hintText, 9, C_MUTED, false);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(0, dp(2), 0, dp(8));
         content.addView(hint, fullWidth());
@@ -1388,21 +1501,15 @@ public class MainActivity extends Activity {
             }
         });
         actions.addView(cancel, weightH(30));
-        Button stop = smallButton("停止", C_RED);
-        stop.setOnClickListener(new View.OnClickListener() {
+        Button ok = smallButton(okLabel, C_RED);
+        ok.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 dialog.dismiss();
-                JSONObject body = new JSONObject();
-                try {
-                    body.put("session", selectedId);
-                } catch (Exception ignored) {
-                }
-                api("POST", "/api/stop", body, simpleCallback("已停止"));
-                toast("已停止");
+                action.run();
             }
         });
-        actions.addView(stop, weightH(30));
+        actions.addView(ok, weightH(30));
         content.addView(actions, lp(-1, -2, 0, 8, 0, 0));
 
         ScrollView scroll = new ScrollView(this);
@@ -1608,16 +1715,23 @@ public class MainActivity extends Activity {
         try {
             JSONArray list = new JSONArray(serverList());
             JSONArray next = new JSONArray();
+            String keptName = "";
             for (int i = 0; i < list.length(); i += 1) {
                 JSONObject item = list.optJSONObject(i);
                 if (item == null) continue;
-                if (url.equals(item.optString("url", ""))) continue;
+                if (url.equals(item.optString("url", ""))) {
+                    keptName = item.optString("name", "");
+                    continue;
+                }
                 next.put(item);
             }
+            // Loads and switches pass an empty name; they must not wipe the label
+            // the user typed when naming this host.
+            String wanted = name == null ? "" : name.trim();
             JSONObject entry = new JSONObject();
             entry.put("url", url);
             entry.put("token", token);
-            entry.put("name", name == null ? "" : name);
+            entry.put("name", wanted.isEmpty() ? keptName : wanted);
             next.put(entry);
             prefs.edit().putString("servers", next.toString()).apply();
         } catch (Exception ignored) {
