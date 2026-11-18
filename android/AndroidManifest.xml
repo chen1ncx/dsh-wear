@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.dsh.watch"
-    android:versionCode="4"
+    android:versionCode="5"
     android:versionName="0.1.0">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="27" />
@@ -15,7 +15,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="DSH on wear"
         android:supportsRtl="false"
-        android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+        android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
 
         <activity
