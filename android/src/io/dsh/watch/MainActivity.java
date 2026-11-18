@@ -199,21 +199,6 @@ public class MainActivity extends Activity {
 
     // ============================================================ lifecycle
 
-    /**
-     * Render at a fixed 240dpi at most. The watch ROM lets the user force a
-     * smaller/larger density system-wide; the app's layout is tuned for a
-     * compact screen and must not swell to 320dpi.
-     */
-    @Override
-    protected void attachBaseContext(Context base) {
-        Configuration override = new Configuration();
-        override.setTo(base.getResources().getConfiguration());
-        if (override.densityDpi > 288) override.densityDpi = 288;
-        override.fontScale = Math.min(1f, override.fontScale);
-        applyOverrideConfiguration(override);
-        super.attachBaseContext(base);
-    }
-
     @Override
     protected void onCreate(Bundle bundle) {
         super.onCreate(bundle);
@@ -641,7 +626,7 @@ public class MainActivity extends Activity {
     FrameLayout pagerPage() {
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(C_BG);
-        frame.setPadding(0, 0, 0, dp(18));
+        frame.setPadding(0, 0, 0, dp(2));
         frame.setLayoutParams(new LinearLayout.LayoutParams(pageWidth, ViewGroup.LayoutParams.MATCH_PARENT));
         return frame;
     }
@@ -674,23 +659,23 @@ public class MainActivity extends Activity {
         indicator = new LinearLayout(this);
         indicator.setOrientation(LinearLayout.HORIZONTAL);
         indicator.setGravity(Gravity.CENTER);
-        indicator.setPadding(dp(6), dp(3), dp(6), dp(3));
+        indicator.setPadding(dp(5), dp(2), dp(5), dp(2));
         indicator.setClickable(false);
         indicator.setFocusable(false);
 
-        // Liquid-glass shell: a translucent vertical sheen plus a hairline top
-        // edge reads as frosted glass over the dark UI without a solid plate.
-        GradientDrawable pill = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0x5CFFFFFF, 0x1FFFFFFF});
-        pill.setCornerRadius(dp(14));
+        // A small solid capsule: the pages now run to the bottom edge, so the
+        // pill has to hide the row behind it instead of letting it show through.
+        GradientDrawable pill = new GradientDrawable();
+        pill.setColor(C_CARD_HI);
+        pill.setCornerRadius(dp(10));
+        pill.setStroke(dp(1), 0x33FFFFFF);
         indicator.setBackground(pill);
 
         for (int i = 0; i < 4; i += 1) {
             View dot = new View(this);
             dot.setClickable(false);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(5), dp(5));
-            params.setMargins(dp(3), 0, dp(3), 0);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(4), dp(4));
+            params.setMargins(dp(2), 0, dp(2), 0);
             dot.setLayoutParams(params);
             indicator.addView(dot);
         }
@@ -1018,8 +1003,8 @@ public class MainActivity extends Activity {
             // pressed state, so the selector is turned off entirely.
             listView.setSelector(new ColorDrawable(0x00000000));
             listView.setDrawSelectorOnTop(false);
-            listView.setDividerHeight(dp(3));
-            listView.setPadding(dp(6), dp(2), dp(6), 0);
+            listView.setDividerHeight(dp(2));
+            listView.setPadding(dp(6), dp(2), dp(6), dp(16));
             listView.setClipToPadding(false);
             adapter = new SessionAdapter();
             listView.setAdapter(adapter);
@@ -2079,20 +2064,20 @@ public class MainActivity extends Activity {
             LinearLayout box = new LinearLayout(this);
             box.setOrientation(LinearLayout.VERTICAL);
             box.setGravity(Gravity.CENTER_HORIZONTAL);
-            box.setPadding(dp(16), dp(14), dp(16), dp(8));
+            box.setPadding(dp(16), dp(22), dp(16), dp(10));
 
-            TextView title = text("DSH on wear", 15, C_ACCENT, true);
+            TextView title = text("DSH on wear", 16, C_ACCENT, true);
             title.setGravity(Gravity.CENTER);
             box.addView(title, fullWidth());
-            TextView tagline = text("在手表上查看您的电脑端的 DSH", 9, C_TEXT, false);
+            TextView tagline = text("在手表上查看您的电脑端的 DSH", 10, C_TEXT, false);
             tagline.setGravity(Gravity.CENTER);
             tagline.setPadding(0, dp(3), 0, 0);
             box.addView(tagline, fullWidth());
-            TextView compat = text("兼容 DSH Go", 8, C_MUTED, false);
+            TextView compat = text("兼容 DSH Go", 9, C_MUTED, false);
             compat.setGravity(Gravity.CENTER);
             compat.setPadding(0, dp(1), 0, 0);
             box.addView(compat, fullWidth());
-            TextView sub = text("要退出吗？", 9, C_MUTED, false);
+            TextView sub = text("要退出吗？", 10, C_MUTED, false);
             sub.setGravity(Gravity.CENTER);
             sub.setPadding(0, dp(6), 0, 0);
             box.addView(sub, fullWidth());
@@ -2104,7 +2089,7 @@ public class MainActivity extends Activity {
                     showList();
                 }
             });
-            box.addView(stay, lp(-1, dp(30), 0, 12, 0, 0));
+            box.addView(stay, lp(-1, dp(34), 0, 14, 0, 0));
 
             Button quit = smallButton("退出应用", C_RED);
             quit.setOnClickListener(new View.OnClickListener() {
@@ -2113,7 +2098,7 @@ public class MainActivity extends Activity {
                     quitApp();
                 }
             });
-            box.addView(quit, lp(-1, dp(30), 0, 6, 0, 0));
+            box.addView(quit, lp(-1, dp(34), 0, 6, 0, 0));
 
             screenExit.addView(box, weightV());
         }
@@ -2262,7 +2247,7 @@ public class MainActivity extends Activity {
             LinearLayout row = new LinearLayout(MainActivity.this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(8), dp(7), dp(8), dp(7));
+            row.setPadding(dp(8), dp(5), dp(8), dp(5));
             row.setBackground(rowState());
 
             Session s = rows.get(position);
