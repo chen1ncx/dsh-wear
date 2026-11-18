@@ -953,6 +953,7 @@ public class MainActivity extends Activity {
     }
 
     boolean showArchived;
+    TextView listEmpty;
     String pendingDelete;
     boolean needsAuth;
 
@@ -1033,6 +1034,11 @@ public class MainActivity extends Activity {
                 }
             });
             screenList.addView(listView, weightV());
+            listEmpty = text("", 11, C_MUTED, false);
+            listEmpty.setGravity(Gravity.CENTER);
+            listEmpty.setPadding(dp(16), 0, dp(16), dp(24));
+            listEmpty.setVisibility(View.GONE);
+            screenList.addView(listEmpty, weightV());
         }
         showScreen(screenList);
         bindSessions();
@@ -1062,6 +1068,17 @@ public class MainActivity extends Activity {
             if (showArchived) rows.addAll(archived);
         }
         if (adapter != null) adapter.notifyDataSetChanged();
+        if (listEmpty != null) {
+            boolean empty = rows.isEmpty();
+            listView.setVisibility(empty ? View.GONE : View.VISIBLE);
+            listEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
+            if (empty) {
+                String host = shortHost(baseUrl == null ? "" : baseUrl);
+                listEmpty.setText(lastError.isEmpty()
+                        ? "这台还没有对话\n点 ＋ 新建一个"
+                        : "连不上这台\n" + host + "\n在「设备」里换一台\n或在配对页里重新配对");
+            }
+        }
         if (listStatus != null) {
             if (rows.isEmpty()) {
                 listStatus.setText(lastError.isEmpty() ? "没有会话" : "连不上");
@@ -1818,6 +1835,9 @@ public class MainActivity extends Activity {
         prefs.edit().putString("url", url).putString("token", newToken).apply();
         selectedId = null;
         state = null;
+        // The previous host's conversations must not linger under the new one.
+        sessions = new JSONArray();
+        lastError = "";
         showList();
         refreshNow(true);
     }
