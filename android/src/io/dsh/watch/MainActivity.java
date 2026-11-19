@@ -143,12 +143,6 @@ public class MainActivity extends Activity {
     final Map<String, Bitmap> imageCache = new HashMap<>();
     /** Process rows the user opened, keyed by timeline index. */
     final Set<Integer> expandedRows = new HashSet<>();
-    /** Last time the user touched the detail page; polls must not rebuild under their finger. */
-    long lastTouchAt;
-    boolean repaintPending;
-    /** Skip the full rebuild when the payload did not change (watch CPU is slow). */
-    String renderedSessionId = "";
-    int renderedSig;
     /** Model shown on the composer chip. */
     String currentModelName = "";
     /** True once this host has answered at least once; before that an empty list means "loading". */
@@ -297,12 +291,6 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {
             // Nothing left to do.
         }
-    }
-
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) lastTouchAt = System.currentTimeMillis();
-        return super.dispatchTouchEvent(ev);
     }
 
     @Override
@@ -1251,39 +1239,8 @@ public class MainActivity extends Activity {
     }
 
     void renderDetail() {
-        renderDetail(false);
-    }
-
-    /** One deferred repaint, so a skipped poll still lands when the finger lifts. */
-    void scheduleDetailRepaint() {
-        if (repaintPending) return;
-        repaintPending = true;
-        ui.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                repaintPending = false;
-                renderDetail(true);
-            }
-        }, 950);
-    }
-
-    void renderDetail(boolean force) {
         if (detailBox == null) return;
         JSONObject session = state == null ? null : state.optJSONObject("session");
-        if (session != null) {
-            String sid = session.optString("id", "");
-            int sig = shapeOf(session);
-            boolean same = !force && sid.equals(renderedSessionId) && sig == renderedSig
-                    && detailBox.getChildCount() > 0;
-            long sinceTouch = System.currentTimeMillis() - lastTouchAt;
-            if (same || (!force && sinceTouch < 900)) {
-                renderDetailActions(session);
-                if (!same) scheduleDetailRepaint();
-                return;
-            }
-            renderedSessionId = sid;
-            renderedSig = sig;
-        }
         if (session == null) {
             detailBox.removeAllViews();
             detailTitle.setText("…");
@@ -1425,20 +1382,10 @@ public class MainActivity extends Activity {
             @Override
             public void done(byte[] data, String error) {
                 if (data == null) return;
-                net.execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        final Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
-                        if (bitmap == null) return;
-                        ui.post(new Runnable() {
-                            @Override
-                            public void run() {
-                                imageCache.put(imageId, bitmap);
-                                view.setImageBitmap(scaleTo(bitmap, dp(150)));
-                            }
-                        });
-                    }
-                });
+                Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+                if (bitmap == null) return;
+                imageCache.put(imageId, bitmap);
+                view.setImageBitmap(scaleTo(bitmap, dp(150)));
             }
         });
     }
@@ -1492,7 +1439,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
 
         apiRaw("/api/image?session=" + enc(sessionId) + "&id=" + enc(imageId), new RawCallback() {
             @Override
@@ -1501,25 +1448,11 @@ public class MainActivity extends Activity {
                     toast(error == null ? "图片读不到" : error);
                     return;
                 }
-                Bitmap cachedBitmap = imageCache.get(imageId);
-                if (cachedBitmap != null) {
-                    view.setImageBitmap(scaleTo(cachedBitmap, dp(250)));
-                    return;
-                }
-                net.execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        final Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
-                        if (bitmap == null) return;
-                        ui.post(new Runnable() {
-                            @Override
-                            public void run() {
-                                imageCache.put(imageId, bitmap);
-                                view.setImageBitmap(scaleTo(bitmap, dp(250)));
-                            }
-                        });
-                    }
-                });
+                Bitmap bitmap = imageCache.get(imageId);
+                if (bitmap == null) bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+                if (bitmap == null) return;
+                imageCache.put(imageId, bitmap);
+                view.setImageBitmap(scaleTo(bitmap, dp(250)));
             }
         });
     }
@@ -1532,33 +1465,6 @@ public class MainActivity extends Activity {
         float scale = maxSide / (float) longest;
         return Bitmap.createScaledBitmap(source, Math.max(1, (int) (width * scale)),
                 Math.max(1, (int) (height * scale)), true);
-    }
-
-    /** Cheap shape of a payload: enough to notice a new message/tool, not every word. */
-    int shapeOf(JSONObject session) {
-        int sig = 17;
-        sig = sig * 31 + session.optString("id", "").hashCode();
-        sig = sig * 31 + (session.optBoolean("running", false) ? 1 : 0);
-        sig = sig * 31 + (session.optBoolean("auto", false) ? 1 : 0);
-        JSONArray pending = session.optJSONArray("pending");
-        sig = sig * 31 + (pending == null ? 0 : pending.length());
-        JSONArray blocks = session.optJSONArray("blocks");
-        sig = sig * 31 + (blocks == null ? 0 : blocks.length());
-        if (blocks != null && blocks.length() > 0) {
-            JSONObject last = blocks.optJSONObject(blocks.length() - 1);
-            if (last != null) {
-                JSONArray items = last.optJSONArray("items");
-                sig = sig * 31 + (items == null ? 0 : items.length());
-                sig = sig * 31 + last.optString("text", "").length();
-            }
-        }
-        JSONArray messages = session.optJSONArray("messages");
-        sig = sig * 31 + (messages == null ? 0 : messages.length());
-        if (messages != null && messages.length() > 0) {
-            JSONObject last = messages.optJSONObject(messages.length() - 1);
-            if (last != null) sig = sig * 31 + last.optString("text", "").length();
-        }
-        return sig;
     }
 
     /** The conversation plus its process, the way the phone shows it. */
@@ -1578,9 +1484,7 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        // Only the tail: a hundred views is what made the watch stutter.
-        int firstBlock = Math.max(0, blocks.length() - 8);
-        for (int i = firstBlock; i < blocks.length(); i += 1) {
+        for (int i = 0; i < blocks.length(); i += 1) {
             JSONObject block = blocks.optJSONObject(i);
             if (block == null) continue;
             String kind = block.optString("kind", "");
@@ -1648,8 +1552,7 @@ public class MainActivity extends Activity {
 
         if (open) {
             JSONArray items = block.optJSONArray("items");
-            int shown = items == null ? 0 : Math.min(items.length(), 6);
-            for (int i = 0; i < shown; i += 1) {
+            for (int i = 0; items != null && i < items.length(); i += 1) {
                 JSONObject item = items.optJSONObject(i);
                 if (item == null) continue;
                 String kind = item.optString("kind", "");
@@ -1695,7 +1598,7 @@ public class MainActivity extends Activity {
                 public void onClick(View v) {
                     if (expandedRows.contains(index)) expandedRows.remove(index);
                     else expandedRows.add(index);
-                    renderDetail(true);
+                    renderDetail();
                 }
             });
         }
@@ -2125,7 +2028,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     /** The composer: a floating capsule with +, the model, the text and send. */
@@ -2197,7 +2100,7 @@ public class MainActivity extends Activity {
             params.y = dp(8);
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     /** Header row with a ✕ that closes the dialog: the watch has no easy outside tap. */
@@ -2217,13 +2120,6 @@ public class MainActivity extends Activity {
         });
         head.addView(close, lp(dp(22), dp(22), 4, 0, 0, 0));
         return head;
-    }
-
-    /** Show a dialog with the platform's zoom/scale animation switched off. */
-    void showPlain(Dialog dialog) {
-        Window window = dialog.getWindow();
-        if (window != null) window.setWindowAnimations(0);
-        showPlain(dialog);
     }
 
     /** Round button used inside the composer capsule. */
@@ -2294,7 +2190,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     boolean hasStorage() {
@@ -2405,7 +2301,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     void collectImages(File dir, ArrayList<File> out, int depth) {
@@ -2533,7 +2429,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     String shortPath(File dir) {
@@ -2844,7 +2740,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     /** "open.bigmodel.cn" reads better as "bigmodel" on a 186dp screen. */
@@ -2988,7 +2884,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     /** Known DSH hosts: [{url, token, name}], the current one included. */
@@ -3078,7 +2974,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     void forgetServer(String url) {
@@ -3152,7 +3048,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
 
         // Fill in synchronously: the list lives in SharedPreferences.
         list.removeAllViews();
