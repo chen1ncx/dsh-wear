@@ -12,6 +12,8 @@ import android.content.Intent;
 import android.os.Build;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -39,6 +41,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
@@ -134,6 +137,8 @@ public class MainActivity extends Activity {
     static final int NOTE_ID = 1001;
     /** Sessions that finished a turn and were not opened since. */
     final Set<String> finishedUnseen = new HashSet<>();
+    /** Decoded previews, so a 4s poll does not refetch the same picture. */
+    final Map<String, Bitmap> imageCache = new HashMap<>();
     final Map<String, Boolean> runningBefore = new HashMap<>();
     static final String TAG = "DSHWatch";
     static final int POLL_MS = 4000;
@@ -557,6 +562,52 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    /** Binary fetch (images): no JSON parsing, just bytes. */
+    interface RawCallback {
+        void done(byte[] data, String error);
+    }
+
+    void apiRaw(final String path, final RawCallback cb) {
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                byte[] bytes = null;
+                String error = null;
+                try {
+                    URL url = new URL(baseUrl + path);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setConnectTimeout(6000);
+                    conn.setReadTimeout(15000);
+                    conn.setRequestProperty("Accept", "image/*");
+                    if (token != null) conn.setRequestProperty("Authorization", "Bearer " + token);
+                    int status = conn.getResponseCode();
+                    if (status >= 200 && status < 300) bytes = readAllBytes(conn.getInputStream());
+                    else error = "HTTP " + status;
+                    conn.disconnect();
+                } catch (Exception err) {
+                    error = err.getClass().getSimpleName();
+                }
+                final byte[] data = bytes;
+                final String message = error;
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        cb.done(data, message);
+                    }
+                });
+            }
+        });
+    }
+
+    static byte[] readAllBytes(InputStream in) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int n;
+        while ((n = in.read(buffer)) > 0) out.write(buffer, 0, n);
+        in.close();
+        return out.toByteArray();
     }
 
     // ============================================================ pairing
@@ -1198,6 +1249,8 @@ public class MainActivity extends Activity {
             }
         }
 
+        renderActivity(session);
+
         JSONArray messages = session.optJSONArray("messages");
         if (messages != null) {
             for (int i = 0; i < messages.length(); i += 1) {
@@ -1223,6 +1276,166 @@ public class MainActivity extends Activity {
             }
         });
         renderDetailActions(session);
+    }
+
+    /** What the agent is doing right now: thinking, tool calls, files, images. */
+    void renderActivity(JSONObject session) {
+        if (detailBox == null) return;
+        String thinking = session.optString("thinking", "");
+        JSONArray tools = session.optJSONArray("tools");
+        JSONArray files = session.optJSONArray("files");
+        JSONArray images = session.optJSONArray("images");
+        boolean hasTools = tools != null && tools.length() > 0;
+        boolean hasFiles = files != null && files.length() > 0;
+        boolean hasImages = images != null && images.length() > 0;
+        if (thinking.isEmpty() && !hasTools && !hasFiles && !hasImages) return;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(5), dp(8), dp(6));
+        GradientDrawable shape = bg(C_CARD, 14);
+        shape.setStroke(dp(1), C_LINE);
+        box.setBackground(shape);
+        box.addView(text("过程", 8, C_MUTED, false));
+
+        if (!thinking.isEmpty()) {
+            TextView think = text(thinking, 9, C_MUTED, false);
+            think.setMaxLines(3);
+            think.setEllipsize(TextUtils.TruncateAt.END);
+            think.setPadding(0, dp(2), 0, 0);
+            box.addView(think);
+        }
+        if (hasTools) {
+            for (int i = 0; i < tools.length(); i += 1) {
+                JSONObject tool = tools.optJSONObject(i);
+                if (tool == null) continue;
+                String name = tool.optString("name", "tool");
+                String arg = tool.optString("arg", "");
+                boolean known = !tool.isNull("ok");
+                boolean ok = tool.optBoolean("ok", true);
+                LinearLayout line = row();
+                line.setPadding(0, dp(1), 0, 0);
+                TextView mark = text(known ? (ok ? "✓" : "✗") : "·", 9, known ? (ok ? C_GREEN : C_RED) : C_MUTED, true);
+                line.addView(mark, lp(dp(10), -2, 0, 0, 2, 0));
+                TextView label = text(arg.isEmpty() ? name : name + " · " + arg, 9, C_TEXT, false);
+                label.setSingleLine(true);
+                label.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                line.addView(label, weight(1));
+                box.addView(line);
+            }
+        }
+        if (hasFiles) {
+            TextView produced = text("产出 " + files.length() + " 个文件 · 到 DSH 上看", 9, C_BLUE, false);
+            produced.setPadding(0, dp(3), 0, 0);
+            produced.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    toast("打开手机或电脑上的 DSH 查看");
+                }
+            });
+            box.addView(produced);
+        }
+        if (hasImages) {
+            LinearLayout strip = row();
+            strip.setPadding(0, dp(4), 0, 0);
+            final String sessionId = session.optString("id", "");
+            for (int i = 0; i < images.length(); i += 1) {
+                JSONObject image = images.optJSONObject(i);
+                if (image == null) continue;
+                final String imageId = image.optString("id", "");
+                final String name = image.optString("name", "");
+                if (imageId.isEmpty()) continue;
+                ImageView thumb = new ImageView(this);
+                thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                thumb.setBackground(bg(C_CARD_HI, 10));
+                thumb.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showImage(sessionId, imageId, name);
+                    }
+                });
+                strip.addView(thumb, lp(dp(74), dp(74), 0, 0, 6, 0));
+                loadThumb(sessionId, imageId, thumb);
+            }
+            box.addView(strip);
+        }
+        detailBox.addView(box, lp(-1, -2, 0, 0, 0, 5));
+    }
+
+    void loadThumb(final String sessionId, final String imageId, final ImageView view) {
+        Bitmap cached = imageCache.get(imageId);
+        if (cached != null) {
+            view.setImageBitmap(scaleTo(cached, dp(150)));
+            return;
+        }
+        apiRaw("/api/image?session=" + enc(sessionId) + "&id=" + enc(imageId), new RawCallback() {
+            @Override
+            public void done(byte[] data, String error) {
+                if (data == null) return;
+                Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+                if (bitmap == null) return;
+                imageCache.put(imageId, bitmap);
+                view.setImageBitmap(scaleTo(bitmap, dp(150)));
+            }
+        });
+    }
+
+    void showImage(final String sessionId, final String imageId, String name) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(10), dp(10), dp(10), dp(10));
+        GradientDrawable card = bg(C_CARD_HI, 20);
+        content.setBackground(card);
+
+        TextView title = text(name.isEmpty() ? "图片" : name, 9, C_MUTED, false);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        content.addView(title, fullWidth());
+
+        final ImageView view = new ImageView(this);
+        view.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        content.addView(view, lp(-1, -2, 0, 4, 0, 0));
+
+        dialog.setContentView(content);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+
+        apiRaw("/api/image?session=" + enc(sessionId) + "&id=" + enc(imageId), new RawCallback() {
+            @Override
+            public void done(byte[] data, String error) {
+                if (data == null) {
+                    toast(error == null ? "图片读不到" : error);
+                    return;
+                }
+                Bitmap bitmap = imageCache.get(imageId);
+                if (bitmap == null) bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+                if (bitmap == null) return;
+                imageCache.put(imageId, bitmap);
+                view.setImageBitmap(scaleTo(bitmap, dp(250)));
+            }
+        });
+    }
+
+    static Bitmap scaleTo(Bitmap source, int maxSide) {
+        int width = source.getWidth();
+        int height = source.getHeight();
+        int longest = Math.max(width, height);
+        if (longest <= maxSide || longest == 0) return source;
+        float scale = maxSide / (float) longest;
+        return Bitmap.createScaledBitmap(source, Math.max(1, (int) (width * scale)),
+                Math.max(1, (int) (height * scale)), true);
     }
 
     void renderDetailActions(JSONObject session) {
