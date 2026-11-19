@@ -143,6 +143,9 @@ public class MainActivity extends Activity {
     final Map<String, Bitmap> imageCache = new HashMap<>();
     /** Process rows the user opened, keyed by timeline index. */
     final Set<Integer> expandedRows = new HashSet<>();
+    /** Skip the full rebuild when the payload did not change (watch CPU is slow). */
+    String renderedSessionId = "";
+    int renderedSig;
     /** Model shown on the composer chip. */
     String currentModelName = "";
     /** True once this host has answered at least once; before that an empty list means "loading". */
@@ -1239,8 +1242,24 @@ public class MainActivity extends Activity {
     }
 
     void renderDetail() {
+        renderDetail(false);
+    }
+
+    void renderDetail(boolean force) {
         if (detailBox == null) return;
         JSONObject session = state == null ? null : state.optJSONObject("session");
+        if (session != null) {
+            String sid = session.optString("id", "");
+            int sig = session.toString().hashCode();
+            boolean same = !force && sid.equals(renderedSessionId) && sig == renderedSig
+                    && detailBox.getChildCount() > 0;
+            if (same) {
+                renderDetailActions(session);
+                return;
+            }
+            renderedSessionId = sid;
+            renderedSig = sig;
+        }
         if (session == null) {
             detailBox.removeAllViews();
             detailTitle.setText("…");
@@ -1552,7 +1571,8 @@ public class MainActivity extends Activity {
 
         if (open) {
             JSONArray items = block.optJSONArray("items");
-            for (int i = 0; items != null && i < items.length(); i += 1) {
+            int shown = items == null ? 0 : Math.min(items.length(), 10);
+            for (int i = 0; i < shown; i += 1) {
                 JSONObject item = items.optJSONObject(i);
                 if (item == null) continue;
                 String kind = item.optString("kind", "");
@@ -1598,7 +1618,7 @@ public class MainActivity extends Activity {
                 public void onClick(View v) {
                     if (expandedRows.contains(index)) expandedRows.remove(index);
                     else expandedRows.add(index);
-                    renderDetail();
+                    renderDetail(true);
                 }
             });
         }
