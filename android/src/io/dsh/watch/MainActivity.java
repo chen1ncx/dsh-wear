@@ -147,6 +147,8 @@ public class MainActivity extends Activity {
     String currentModelName = "";
     /** True once this host has answered at least once; before that an empty list means "loading". */
     boolean gotState;
+    /** True while the conversation itself fills the middle page (not the list). */
+    boolean readingDetail;
     static final int REQ_STORAGE = 7;
     /** 1 = image picker, 2 = file picker; resumed after the permission answer. */
     int pendingPicker = 0;
@@ -775,7 +777,7 @@ public class MainActivity extends Activity {
 
     void updateIndicator(int page) {
         if (indicator == null) return;
-        boolean reading = screenDetail != null && screenDetail.getVisibility() == View.VISIBLE;
+        boolean reading = readingDetail;
         indicator.setVisibility(reading ? View.GONE : View.VISIBLE);
         if (detailActions != null) {
             detailActions.setPadding(dp(6), dp(2), dp(6), reading ? dp(6) : dp(18));
@@ -816,7 +818,7 @@ public class MainActivity extends Activity {
         public boolean onInterceptTouchEvent(MotionEvent ev) {
             // While reading a conversation the pager stays put: leaving is the
             // back arrow's job, and a stray sideways drag must not page away.
-            if (screenDetail != null && screenDetail.getVisibility() == View.VISIBLE) return false;
+            if (readingDetail) return false;
             if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 downX = ev.getX();
                 downY = ev.getY();
@@ -1140,6 +1142,7 @@ public class MainActivity extends Activity {
             listEmpty.setVisibility(View.GONE);
             screenList.addView(listEmpty, weightV());
         }
+        readingDetail = false;
         showScreen(screenList);
         bindSessions();
     }
@@ -1254,6 +1257,7 @@ public class MainActivity extends Activity {
             detailActions.setPadding(dp(6), dp(2), dp(6), dp(18));
             screenDetail.addView(detailActions, fullWidth());
         }
+        readingDetail = true;
         showScreen(screenDetail);
         renderDetail();
     }
