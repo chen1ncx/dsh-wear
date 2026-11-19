@@ -61,6 +61,8 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -216,6 +218,14 @@ public class MainActivity extends Activity {
             baseUrl = prefs.getString("url", null);
             token = prefs.getString("token", null);
             applyTheme(prefs.getInt("theme", 0));
+            try {
+                JSONArray unseen = new JSONArray(prefs.getString("finishedUnseen", "[]"));
+                for (int i = 0; i < unseen.length(); i += 1) {
+                    String id = unseen.optString(i, "");
+                    if (!id.isEmpty()) finishedUnseen.add(id);
+                }
+            } catch (Exception ignored) {
+            }
 
             root = new FrameLayout(this);
             root.setBackgroundColor(C_BG);
@@ -384,6 +394,7 @@ public class MainActivity extends Activity {
                         if (before != null && before && !running) {
                             // The turn ended while we were polling: badge it.
                             finishedUnseen.add(sid);
+                            saveFinished();
                             notifyDone(item.optString("title", sid));
                         }
                     }
@@ -1018,6 +1029,7 @@ public class MainActivity extends Activity {
                         }
                         selectedId = rows.get(position).id;
                         finishedUnseen.remove(selectedId);
+                        saveFinished();
                         cancelDoneNote();
                         lastPending = -1;
                         state = null;
@@ -1062,6 +1074,14 @@ public class MainActivity extends Activity {
             s.pending = item.optInt("pending", 0);
             if (s.archived) archived.add(s); else rows.add(s);
         }
+        // Newest result first: need-you-now, then just-finished, then running.
+        // Collections.sort is stable, so each bucket keeps the server's order.
+        Collections.sort(rows, new Comparator<Session>() {
+            @Override
+            public int compare(Session a, Session b) {
+                return listBucket(a) - listBucket(b);
+            }
+        });
         // The header row stays above its group, open or closed.
         if (!archived.isEmpty()) {
             Session toggle = new Session();
@@ -1433,6 +1453,7 @@ public class MainActivity extends Activity {
                     @Override
                     public void onOk(JSONObject response) {
                         finishedUnseen.remove(target.id);
+                        saveFinished();
                         if (target.id.equals(selectedId)) selectedId = null;
                         toast("已删除");
                         showList();
@@ -2225,6 +2246,25 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================== widgets
+
+    /** 0 = waiting on you, 1 = just finished and unread, then running / live / rest. */
+    int listBucket(Session s) {
+        if (s.pending > 0) return 0;
+        if (finishedUnseen.contains(s.id)) return 1;
+        if (s.running) return 2;
+        if (s.live) return 3;
+        return 4;
+    }
+
+    /** The unread dots survive a relaunch, like message badges. */
+    void saveFinished() {
+        try {
+            JSONArray arr = new JSONArray();
+            for (String id : finishedUnseen) arr.put(id);
+            prefs.edit().putString("finishedUnseen", arr.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
 
     class SessionAdapter extends BaseAdapter {
         @Override
