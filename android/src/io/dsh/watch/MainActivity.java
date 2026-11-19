@@ -814,6 +814,9 @@ public class MainActivity extends Activity {
          */
         @Override
         public boolean onInterceptTouchEvent(MotionEvent ev) {
+            // While reading a conversation the pager stays put: leaving is the
+            // back arrow's job, and a stray sideways drag must not page away.
+            if (screenDetail != null && screenDetail.getVisibility() == View.VISIBLE) return false;
             if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 downX = ev.getX();
                 downY = ev.getY();
