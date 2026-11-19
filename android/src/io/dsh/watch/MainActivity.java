@@ -763,6 +763,16 @@ public class MainActivity extends Activity {
         updateIndicator(pageIndex);
     }
 
+    /** Visibility changes land later in the same frame; decide the pill after them. */
+    void refreshIndicatorSoon() {
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                updateIndicator(pageIndex);
+            }
+        });
+    }
+
     void updateIndicator(int page) {
         if (indicator == null) return;
         boolean reading = screenDetail != null && screenDetail.getVisibility() == View.VISIBLE;
@@ -1040,7 +1050,7 @@ public class MainActivity extends Activity {
     boolean needsAuth;
 
     void showList() {
-        updateIndicator(pageIndex);
+        refreshIndicatorSoon();
         if (token == null) {
             showPair(null);
             return;
@@ -1191,7 +1201,7 @@ public class MainActivity extends Activity {
     }
 
     void showDetail() {
-        updateIndicator(pageIndex);
+        refreshIndicatorSoon();
         if (selectedId == null) {
             showList();
             return;
