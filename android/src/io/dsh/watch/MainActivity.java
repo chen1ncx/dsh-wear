@@ -1439,7 +1439,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
 
         apiRaw("/api/image?session=" + enc(sessionId) + "&id=" + enc(imageId), new RawCallback() {
             @Override
@@ -2028,7 +2028,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     /** The composer: a floating capsule with +, the model, the text and send. */
@@ -2100,7 +2100,7 @@ public class MainActivity extends Activity {
             params.y = dp(8);
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     /** Header row with a ✕ that closes the dialog: the watch has no easy outside tap. */
@@ -2120,13 +2120,6 @@ public class MainActivity extends Activity {
         });
         head.addView(close, lp(dp(22), dp(22), 4, 0, 0, 0));
         return head;
-    }
-
-    /** Show a dialog with the platform's zoom/scale animation switched off. */
-    void showPlain(Dialog dialog) {
-        Window window = dialog.getWindow();
-        if (window != null) window.setWindowAnimations(0);
-        showPlain(dialog);
     }
 
     /** Round button used inside the composer capsule. */
@@ -2197,7 +2190,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     boolean hasStorage() {
@@ -2308,7 +2301,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     void collectImages(File dir, ArrayList<File> out, int depth) {
@@ -2436,7 +2429,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     String shortPath(File dir) {
@@ -2747,7 +2740,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     /** "open.bigmodel.cn" reads better as "bigmodel" on a 186dp screen. */
@@ -2891,7 +2884,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     /** Known DSH hosts: [{url, token, name}], the current one included. */
@@ -2981,7 +2974,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
     }
 
     void forgetServer(String url) {
@@ -3055,7 +3048,7 @@ public class MainActivity extends Activity {
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
-        showPlain(dialog);
+        dialog.show();
 
         // Fill in synchronously: the list lives in SharedPreferences.
         list.removeAllViews();
