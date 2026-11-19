@@ -765,6 +765,11 @@ public class MainActivity extends Activity {
 
     void updateIndicator(int page) {
         if (indicator == null) return;
+        boolean reading = screenDetail != null && screenDetail.getVisibility() == View.VISIBLE;
+        indicator.setVisibility(reading ? View.GONE : View.VISIBLE);
+        if (detailActions != null) {
+            detailActions.setPadding(dp(6), dp(2), dp(6), reading ? dp(6) : dp(18));
+        }
         for (int i = 0; i < indicator.getChildCount(); i += 1) {
             View dot = indicator.getChildAt(i);
             LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) dot.getLayoutParams();
@@ -1035,6 +1040,7 @@ public class MainActivity extends Activity {
     boolean needsAuth;
 
     void showList() {
+        updateIndicator(pageIndex);
         if (token == null) {
             showPair(null);
             return;
@@ -1185,6 +1191,7 @@ public class MainActivity extends Activity {
     }
 
     void showDetail() {
+        updateIndicator(pageIndex);
         if (selectedId == null) {
             showList();
             return;
