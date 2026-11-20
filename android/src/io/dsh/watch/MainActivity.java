@@ -2695,9 +2695,14 @@ public class MainActivity extends Activity {
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(0x00000000));
             WindowManager.LayoutParams params = window.getAttributes();
-            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.94f);
-            // Fixed height: the sheet scrolls inside instead of growing past the screen.
-            params.height = (int) (getResources().getDisplayMetrics().heightPixels * 0.84f);
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            params.width = (int) (screenWidth * 0.94f);
+            // Snug to the content, but never taller than the screen: measure the
+            // box first so a short list does not leave a big empty sheet.
+            box.measure(View.MeasureSpec.makeMeasureSpec(params.width, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            params.height = Math.min(box.getMeasuredHeight() + dp(6), (int) (screenHeight * 0.86f));
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
