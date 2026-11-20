@@ -1,6 +1,6 @@
 {
   "name": "dsh-watch-bridge",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Small-screen (smartwatch) bridge for DeepSeek Harness: list sessions, read a conversation, answer approvals and questions, send a short message, stop a turn.",
   "type": "module",
   "main": "lib/index.js",
