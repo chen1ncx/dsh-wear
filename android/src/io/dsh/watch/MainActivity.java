@@ -1467,7 +1467,6 @@ public class MainActivity extends Activity {
             JSONArray legacy = session.optJSONArray("timeline");
             if (legacy != null) {
                 renderFlatTimeline(legacy);
-                renderImages(session);
                 return;
             }
             JSONArray messages = session.optJSONArray("messages");
@@ -1476,7 +1475,6 @@ public class MainActivity extends Activity {
                 if (message == null) continue;
                 detailBox.addView(bubble(message.optString("role", "a"), message.optString("text", "")));
             }
-            renderImages(session);
             return;
         }
         for (int i = 0; i < blocks.length(); i += 1) {
@@ -1502,7 +1500,6 @@ public class MainActivity extends Activity {
                 detailBox.addView(row);
             }
         }
-        renderImages(session);
     }
 
     /** Bridge 0.3.0 layout: a flat list of thinking / tool / message entries. */
