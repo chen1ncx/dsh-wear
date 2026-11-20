@@ -1554,6 +1554,28 @@ public class MainActivity extends Activity {
                 String kind = item.optString("kind", "");
                 if ("think".equals(kind)) {
                     box.addView(processRow(index * 1000 + i, "思考 · " + firstLine(item.optString("text", "")), item.optString("text", ""), C_MUTED));
+                } else if ("image".equals(kind)) {
+                    String picturePath = item.optString("path", item.optString("name", ""));
+                    if (picturePath.isEmpty()) picturePath = item.optString("name", "图片");
+                    final String imageId = item.optString("id", "");
+                    final String imageName = item.optString("name", "");
+                    LinearLayout line = row();
+                    line.setPadding(dp(8), dp(3), dp(8), dp(3));
+                    TextView pic = text("查看图片 · " + shortName(picturePath), 9, C_BLUE, false);
+                    pic.setSingleLine(true);
+                    pic.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                    line.addView(pic, weight(1));
+                    line.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            if (imageId.isEmpty()) {
+                                toast("这张图读不到");
+                                return;
+                            }
+                            showImage(selectedId, imageId, imageName);
+                        }
+                    });
+                    box.addView(line);
                 } else if ("tool".equals(kind)) {
                     String name = item.optString("name", "tool");
                     String arg = item.optString("arg", "");
@@ -1579,6 +1601,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams params = lp(-1, -2, 0, 0, 0, 3);
         box.setLayoutParams(params);
         return box;
+    }
+
+    static String shortName(String path) {
+        if (path == null || path.isEmpty()) return "";
+        int cut = path.lastIndexOf('/');
+        return cut >= 0 && cut + 1 < path.length() ? path.substring(cut + 1) : path;
     }
 
     static String firstLine(String text) {
