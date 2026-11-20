@@ -1,6 +1,7 @@
 package io.dsh.watch;
 
 import android.app.Activity;
+import android.Manifest;
 import android.app.Dialog;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -9,6 +10,7 @@ import android.app.PendingIntent;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
@@ -139,6 +141,15 @@ public class MainActivity extends Activity {
     final Set<String> finishedUnseen = new HashSet<>();
     /** Decoded previews, so a 4s poll does not refetch the same picture. */
     final Map<String, Bitmap> imageCache = new HashMap<>();
+    /** Process rows the user opened, keyed by timeline index. */
+    final Set<Integer> expandedRows = new HashSet<>();
+    /** Model shown on the composer chip. */
+    String currentModelName = "";
+    /** True once this host has answered at least once; before that an empty list means "loading". */
+    boolean gotState;
+    static final int REQ_STORAGE = 7;
+    /** 1 = image picker, 2 = file picker; resumed after the permission answer. */
+    int pendingPicker = 0;
     final Map<String, Boolean> runningBefore = new HashMap<>();
     static final String TAG = "DSHWatch";
     static final int POLL_MS = 4000;
@@ -377,6 +388,7 @@ public class MainActivity extends Activity {
                 refreshing = false;
                 if (mySeq != seqCounter) return;
                 state = body;
+                gotState = true;
                 lastOkAt = System.currentTimeMillis();
                 lastError = "";
                 try {
@@ -424,6 +436,9 @@ public class MainActivity extends Activity {
                 if (mySeq != seqCounter) return;
                 lastError = message;
                 if (status == 401) {
+                    // A pairing attempt is in flight: do not tear the page down
+                    // and clear the code the user is typing.
+                    if (pairing) return;
                     // Keep the token: a 401 usually means this host revoked the
                     // device, and wiping it would force a new pairing just to
                     // switch back later.
@@ -1148,14 +1163,18 @@ public class MainActivity extends Activity {
             listEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
             if (empty) {
                 String host = shortHost(baseUrl == null ? "" : baseUrl);
-                listEmpty.setText(lastError.isEmpty()
-                        ? "这台还没有对话\n点 ＋ 新建一个"
-                        : "连不上这台\n" + host + "\n在「设备」里换一台\n或在配对页里重新配对");
+                if (!lastError.isEmpty()) {
+                    listEmpty.setText("连不上这台\n" + host + "\n在「设备」里换一台\n或在配对页里重新配对");
+                } else if (!gotState) {
+                    listEmpty.setText("读取中…");
+                } else {
+                    listEmpty.setText("这台还没有对话\n点 ＋ 新建一个");
+                }
             }
         }
         if (listStatus != null) {
             if (rows.isEmpty()) {
-                listStatus.setText(lastError.isEmpty() ? "没有会话" : "连不上");
+                listStatus.setText(!lastError.isEmpty() ? "连不上" : (gotState ? "没有会话" : "读取中…"));
             } else {
                 int waiting = 0;
                 for (Session s : rows) waiting += s.pending;
@@ -1249,16 +1268,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        renderActivity(session);
-
-        JSONArray messages = session.optJSONArray("messages");
-        if (messages != null) {
-            for (int i = 0; i < messages.length(); i += 1) {
-                JSONObject m = messages.optJSONObject(i);
-                if (m == null) continue;
-                detailBox.addView(bubble(m.optString("role", "a"), m.optString("text", "")));
-            }
-        }
+        renderTimeline(session);
         String activity = session.optString("activity", "");
         if (session.optBoolean("running", false)) {
             detailBox.addView(note("正在运行" + (activity.isEmpty() ? "" : " · " + activity)));
@@ -1391,13 +1401,32 @@ public class MainActivity extends Activity {
         GradientDrawable card = bg(C_CARD_HI, 20);
         content.setBackground(card);
 
+        LinearLayout head = row();
         TextView title = text(name.isEmpty() ? "图片" : name, 9, C_MUTED, false);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        content.addView(title, fullWidth());
+        head.addView(title, weight(1));
+        Button close = roundKey("✕", C_CARD);
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        head.addView(close, lp(dp(24), dp(24), 4, 0, 0, 0));
+        content.addView(head, fullWidth());
 
         final ImageView view = new ImageView(this);
         view.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        // Tapping the picture also closes the preview: on a watch the outside
+        // strip is only a few pixels wide.
+        view.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
         content.addView(view, lp(-1, -2, 0, 4, 0, 0));
 
         dialog.setContentView(content);
@@ -1436,6 +1465,224 @@ public class MainActivity extends Activity {
         float scale = maxSide / (float) longest;
         return Bitmap.createScaledBitmap(source, Math.max(1, (int) (width * scale)),
                 Math.max(1, (int) (height * scale)), true);
+    }
+
+    /** The conversation plus its process, the way the phone shows it. */
+    void renderTimeline(JSONObject session) {
+        JSONArray blocks = session.optJSONArray("blocks");
+        if (blocks == null) {
+            JSONArray legacy = session.optJSONArray("timeline");
+            if (legacy != null) {
+                renderFlatTimeline(legacy);
+                return;
+            }
+            JSONArray messages = session.optJSONArray("messages");
+            for (int i = 0; messages != null && i < messages.length(); i += 1) {
+                JSONObject message = messages.optJSONObject(i);
+                if (message == null) continue;
+                detailBox.addView(bubble(message.optString("role", "a"), message.optString("text", "")));
+            }
+            return;
+        }
+        for (int i = 0; i < blocks.length(); i += 1) {
+            JSONObject block = blocks.optJSONObject(i);
+            if (block == null) continue;
+            String kind = block.optString("kind", "");
+            if ("msg".equals(kind)) {
+                detailBox.addView(bubble(block.optString("role", "a"), block.optString("text", "")));
+            } else if ("process".equals(kind)) {
+                detailBox.addView(processBlock(i, block));
+            } else if ("files".equals(kind)) {
+                JSONArray files = block.optJSONArray("files");
+                final int count = files == null ? 0 : files.length();
+                if (count == 0) continue;
+                TextView row = text("产出 " + count + " 个文件 · 在 DSH 上查看", 9, C_BLUE, false);
+                row.setPadding(dp(8), dp(3), dp(8), dp(3));
+                row.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        toast("打开手机或电脑上的 DSH 查看");
+                    }
+                });
+                detailBox.addView(row);
+            }
+        }
+    }
+
+    /** Bridge 0.3.0 layout: a flat list of thinking / tool / message entries. */
+    void renderFlatTimeline(JSONArray timeline) {
+        for (int i = 0; i < timeline.length(); i += 1) {
+            JSONObject item = timeline.optJSONObject(i);
+            if (item == null) continue;
+            String kind = item.optString("kind", "");
+            if ("msg".equals(kind)) {
+                detailBox.addView(bubble(item.optString("role", "a"), item.optString("text", "")));
+            } else if ("think".equals(kind)) {
+                detailBox.addView(processRow(i, "思考 · " + firstLine(item.optString("text", "")), item.optString("text", ""), C_MUTED));
+            } else if ("tool".equals(kind)) {
+                String name = item.optString("name", "tool");
+                String arg = item.optString("arg", "");
+                boolean known = !item.isNull("ok");
+                boolean ok = item.optBoolean("ok", true);
+                String mark = known ? (ok ? "✓ " : "✗ ") : "· ";
+                int color = known ? (ok ? C_GREEN : C_RED) : C_MUTED;
+                detailBox.addView(processRow(i, mark + name + (arg.isEmpty() ? "" : " · " + arg), item.optString("result", ""), color));
+            }
+        }
+    }
+
+    /** One turn's tool work: a summary line while collapsed, the rows when open. */
+    View processBlock(final int index, JSONObject block) {
+        boolean running = block.optBoolean("running", false);
+        int toolCount = block.optInt("toolCount", 0);
+        boolean open = running || expandedRows.contains(index);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(5), dp(8), dp(5));
+        box.setBackground(bg(C_CARD, 12));
+
+        LinearLayout head = row();
+        String label = running
+                ? "进行中 · " + toolCount + " 次工具调用"
+                : "已完成 · " + toolCount + " 次工具调用";
+        head.addView(text(label, 9, running ? C_ACCENT : C_MUTED, false), weight(1));
+        head.addView(text(open ? "⌃" : "⌄", 9, C_MUTED, false), lp(dp(10), -2, 2, 0, 0, 0));
+        box.addView(head);
+
+        if (open) {
+            JSONArray items = block.optJSONArray("items");
+            for (int i = 0; items != null && i < items.length(); i += 1) {
+                JSONObject item = items.optJSONObject(i);
+                if (item == null) continue;
+                String kind = item.optString("kind", "");
+                if ("think".equals(kind)) {
+                    box.addView(processRow(index * 1000 + i, "思考 · " + firstLine(item.optString("text", "")), item.optString("text", ""), C_MUTED));
+                } else if ("image".equals(kind)) {
+                    String picturePath = item.optString("path", item.optString("name", ""));
+                    if (picturePath.isEmpty()) picturePath = item.optString("name", "图片");
+                    final String imageId = item.optString("id", "");
+                    final String imageName = item.optString("name", "");
+                    LinearLayout line = row();
+                    line.setPadding(dp(8), dp(3), dp(8), dp(3));
+                    TextView pic = text("查看图片 · " + shortName(picturePath), 9, C_BLUE, false);
+                    pic.setSingleLine(true);
+                    pic.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                    line.addView(pic, weight(1));
+                    line.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            if (imageId.isEmpty()) {
+                                toast("这张图读不到");
+                                return;
+                            }
+                            showImage(selectedId, imageId, imageName);
+                        }
+                    });
+                    box.addView(line);
+                } else if ("tool".equals(kind)) {
+                    String name = item.optString("name", "tool");
+                    String arg = item.optString("arg", "");
+                    boolean known = !item.isNull("ok");
+                    boolean ok = item.optBoolean("ok", true);
+                    String mark = known ? (ok ? "✓ " : "✗ ") : "· ";
+                    int color = known ? (ok ? C_GREEN : C_RED) : C_MUTED;
+                    String body = item.optString("result", "");
+                    box.addView(processRow(index * 1000 + i, mark + name + (arg.isEmpty() ? "" : " · " + arg), body, color));
+                }
+            }
+        }
+        if (!running) {
+            box.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (expandedRows.contains(index)) expandedRows.remove(index);
+                    else expandedRows.add(index);
+                    renderDetail();
+                }
+            });
+        }
+        LinearLayout.LayoutParams params = lp(-1, -2, 0, 0, 0, 3);
+        box.setLayoutParams(params);
+        return box;
+    }
+
+    static String shortName(String path) {
+        if (path == null || path.isEmpty()) return "";
+        int cut = path.lastIndexOf('/');
+        return cut >= 0 && cut + 1 < path.length() ? path.substring(cut + 1) : path;
+    }
+
+    static String firstLine(String text) {
+        if (text == null) return "";
+        String line = text.trim();
+        int cut = line.indexOf('\n');
+        if (cut > 0) line = line.substring(0, cut);
+        return line.length() > 28 ? line.substring(0, 28) + "…" : line;
+    }
+
+    /** One collapsible process line: head always visible, body on tap. */
+    View processRow(final int index, String head, final String body, int color) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(4), dp(8), dp(4));
+        box.setBackground(bg(C_CARD, 12));
+
+        LinearLayout line = row();
+        TextView label = text(head, 9, color, false);
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        line.addView(label, weight(1));
+        boolean open = expandedRows.contains(index);
+        line.addView(text(open ? "⌃" : "⌄", 9, C_MUTED, false), lp(dp(10), -2, 2, 0, 0, 0));
+        box.addView(line);
+
+        if (open && !body.isEmpty()) {
+            TextView detail = text(body, 9, C_MUTED, false);
+            detail.setPadding(0, dp(2), 0, 0);
+            box.addView(detail);
+        }
+        if (!body.isEmpty()) {
+            box.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (expandedRows.contains(index)) expandedRows.remove(index);
+                    else expandedRows.add(index);
+                    renderDetail();
+                }
+            });
+        }
+        LinearLayout.LayoutParams params = lp(-1, -2, 0, 0, 0, 2);
+        box.setLayoutParams(params);
+        return box;
+    }
+
+    /** Pictures produced or read in this session, as thumbnails. */
+    void renderImages(JSONObject session) {
+        JSONArray images = session.optJSONArray("images");
+        if (images == null || images.length() == 0) return;
+        final String sessionId = session.optString("id", "");
+        LinearLayout strip = row();
+        strip.setPadding(dp(6), dp(3), dp(6), dp(4));
+        for (int i = 0; i < images.length(); i += 1) {
+            JSONObject image = images.optJSONObject(i);
+            if (image == null) continue;
+            final String imageId = image.optString("id", "");
+            final String name = image.optString("name", "");
+            if (imageId.isEmpty()) continue;
+            ImageView thumb = new ImageView(this);
+            thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumb.setBackground(bg(C_CARD_HI, 10));
+            thumb.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showImage(sessionId, imageId, name);
+                }
+            });
+            strip.addView(thumb, lp(dp(74), dp(74), 0, 0, 6, 0));
+            loadThumb(sessionId, imageId, thumb);
+        }
+        detailBox.addView(strip);
     }
 
     void renderDetailActions(JSONObject session) {
@@ -1784,82 +2031,270 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    /** The composer: a floating capsule with +, the model, the text and send. */
     void showSayDialog() {
+        if (selectedId == null) return;
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
 
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(12), dp(14), dp(12));
-        GradientDrawable card = new GradientDrawable();
-        card.setColor(C_CARD_HI);
-        card.setCornerRadius(dp(26));
-        content.setBackground(card);
+        LinearLayout island = row();
+        island.setPadding(dp(6), dp(6), dp(6), dp(6));
+        GradientDrawable pill = bg(C_CARD_HI, 30);
+        pill.setStroke(dp(1), C_LINE);
+        island.setBackground(pill);
 
-        TextView title = text("发给 DSH", 13, C_TEXT, true);
-        title.setGravity(Gravity.CENTER);
-        content.addView(title, fullWidth());
-
-        String[] quick = {"继续", "先停一下", "汇报进展"};
-        for (final String q : quick) {
-            Button b = outlinePill(q);
-            b.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    say(q);
-                    dialog.dismiss();
-                }
-            });
-            content.addView(b, lp(-1, dp(28), 0, 5, 0, 0));
-        }
-
-        final EditText input = edit("");
-        input.setHint("自己写一句");
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        input.setSingleLine(true);
-        input.setCursorVisible(true);
-        input.setFocusableInTouchMode(true);
-        input.setShowSoftInputOnFocus(true);
-        GradientDrawable field = new GradientDrawable();
-        field.setColor(C_CARD);
-        field.setCornerRadius(dp(18));
-        field.setStroke(dp(1), C_LINE);
-        input.setBackground(field);
-        content.addView(input, lp(-1, dp(32), 0, 8, 0, 0));
-
-        LinearLayout actions = row();
-        Button cancel = smallButton("取消", C_RED);
-        cancel.setOnClickListener(new View.OnClickListener() {
+        Button plus = roundKey("＋", C_CARD);
+        plus.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                dialog.dismiss();
+                showPlusMenu(dialog);
             }
         });
-        actions.addView(cancel, weightH(30));
+        island.addView(plus, lp(dp(30), dp(30), 0, 0, 5, 0));
 
-        Button send = smallButton("发送", C_ACCENT);
+        final Button model = roundKey(modelLabel(), C_CARD);
+        model.setTextSize(TypedValue.COMPLEX_UNIT_SP, 8);
+        model.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showModelPicker(dialog, model);
+            }
+        });
+        island.addView(model, lp(dp(58), dp(30), 0, 0, 5, 0));
+
+        final EditText input = edit("");
+        input.setHint("给 DSH 发消息…");
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        input.setSingleLine(true);
+        input.setFocusableInTouchMode(true);
+        input.setShowSoftInputOnFocus(true);
+        input.setBackground(null);
+        input.setPadding(0, 0, 0, 0);
+        island.addView(input, weight(1));
+
+        Button send = roundKey("↑", C_ACCENT);
+        send.setTextColor(C_ON_ACCENT);
         send.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 String text = input.getText().toString().trim();
-                if (!text.isEmpty()) say(text);
+                if (text.isEmpty()) return;
+                say(text);
                 dialog.dismiss();
             }
         });
-        actions.addView(send, weightH(30));
-        content.addView(actions, lp(-1, -2, 0, 8, 0, 0));
+        island.addView(send, lp(dp(30), dp(30), 5, 0, 0, 0));
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(content, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        dialog.setContentView(scroll);
-
+        if (currentModelName.isEmpty()) refreshModelLabel(model);
+        dialog.setContentView(island);
         Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(0x00000000));
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.96f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.BOTTOM;
+            params.y = dp(8);
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    /** Header row with a ✕ that closes the dialog: the watch has no easy outside tap. */
+    LinearLayout dialogHead(final Dialog dialog, String label) {
+        LinearLayout head = row();
+        TextView title = text(label, 9, C_MUTED, false);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        head.addView(title, weight(1));
+        Button close = roundKey("✕", C_CARD);
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        head.addView(close, lp(dp(22), dp(22), 4, 0, 0, 0));
+        return head;
+    }
+
+    /** Round button used inside the composer capsule. */
+    Button roundKey(String label, int color) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        button.setTextColor(C_TEXT);
+        button.setPadding(0, 0, 0, 0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setBackground(bg(color, 18));
+        button.setStateListAnimator(null);
+        return button;
+    }
+
+    String modelLabel() {
+        if (currentModelName.isEmpty()) return "模型";
+        String label = currentModelName;
+        if (label.startsWith("DeepSeek-")) label = label.substring(9);
+        return label.length() > 9 ? label.substring(0, 9) : label;
+    }
+
+    void showPlusMenu(final Dialog composer) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(10), dp(10), dp(10));
+        box.setBackground(bg(C_CARD_HI, 28));
+
+        Button photo = roundKey("图片", C_CARD);
+        photo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        photo.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                if (composer != null) composer.dismiss();
+                ensureStorage(1);
+            }
+        });
+        box.addView(dialogHead(dialog, "发送"), fullWidth());
+        box.addView(photo, lp(-1, dp(32), 0, 4, 0, 6));
+
+        Button file = roundKey("文件", C_CARD);
+        file.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        file.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                if (composer != null) composer.dismiss();
+                ensureStorage(2);
+            }
+        });
+        box.addView(file, lp(-1, dp(32), 0, 0, 0, 0));
+
+        dialog.setContentView(box);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.6f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    boolean hasStorage() {
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Ask for storage once, then open whichever picker was requested. */
+    void ensureStorage(int which) {
+        if (hasStorage()) {
+            if (which == 1) showImagePicker(); else showFilePicker(new File("/sdcard/Download"));
+            return;
+        }
+        pendingPicker = which;
+        requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE);
+        toast("先允许读取存储");
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(code, permissions, results);
+        if (code != REQ_STORAGE) return;
+        boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+        int which = pendingPicker;
+        pendingPicker = 0;
+        if (!granted) {
+            toast("没有存储权限，读不到图片和文件");
+            return;
+        }
+        if (which == 1) showImagePicker();
+        else if (which == 2) showFilePicker(new File("/sdcard/Download"));
+    }
+
+    /** Newest pictures anywhere on the watch, as a small grid. */
+    void showImagePicker() {
+        toast("找图片…");
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                final ArrayList<File> found = new ArrayList<>();
+                collectImages(new File("/sdcard"), found, 0);
+                if (found.isEmpty()) collectImages(new File("/storage/emulated/0"), found, 0);
+                Collections.sort(found, new Comparator<File>() {
+                    @Override
+                    public int compare(File a, File b) {
+                        return Long.compare(b.lastModified(), a.lastModified());
+                    }
+                });
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        showImageGrid(found);
+                    }
+                });
+            }
+        });
+    }
+
+    void showImageGrid(final ArrayList<File> found) {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        final Dialog picker = dialog;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(8), dp(8), dp(8));
+        box.setBackground(bg(C_CARD_HI, 24));
+
+        box.addView(dialogHead(picker, found.isEmpty() ? "没有找到图片" : "最近的图片 · " + found.size()), fullWidth());
+        if (found.isEmpty()) {
+            TextView tip = text("用电脑 adb push 一张到 /sdcard/Download 就行", 9, C_MUTED, false);
+            tip.setPadding(0, dp(4), 0, 0);
+            box.addView(tip);
+        }
+        int perRow = 3;
+        LinearLayout gridRow = null;
+        for (int i = 0; i < Math.min(found.size(), 18); i += 1) {
+            if (i % perRow == 0) {
+                gridRow = row();
+                box.addView(gridRow, fullWidth());
+            }
+            final File file = found.get(i);
+            ImageView cell = new ImageView(this);
+            cell.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            cell.setBackground(bg(C_CARD, 8));
+            cell.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    picker.dismiss();
+                    uploadFile(file, "image");
+                }
+            });
+            gridRow.addView(cell, lp(dp(50), dp(50), 0, 0, 5, 5));
+            thumbLocal(file, cell);
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
             WindowManager.LayoutParams params = window.getAttributes();
             params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
             params.height = WindowManager.LayoutParams.WRAP_CONTENT;
@@ -1867,6 +2302,500 @@ public class MainActivity extends Activity {
             window.setAttributes(params);
         }
         dialog.show();
+    }
+
+    void collectImages(File dir, ArrayList<File> out, int depth) {
+        if (dir == null || depth > 6 || out.size() >= 40) return;
+        File[] entries = dir.listFiles();
+        if (entries == null) return;
+        for (File entry : entries) {
+            if (out.size() >= 40) return;
+            String name = entry.getName();
+            if (name.startsWith(".")) continue;
+            if (entry.isDirectory()) {
+                // App-private trees hold thousands of thumbnails and nothing useful.
+                if (name.equals("Android") || name.equals("LOST.DIR") || name.equals("DCIM-cover")) continue;
+                collectImages(entry, out, depth + 1);
+                continue;
+            }
+            String lower = name.toLowerCase();
+            if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png")
+                    || lower.endsWith(".webp") || lower.endsWith(".gif") || lower.endsWith(".bmp")) {
+                if (entry.length() > 64) out.add(entry);
+            }
+        }
+    }
+
+    void thumbLocal(final File file, final ImageView view) {
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+                int sample = 1;
+                while (options.outWidth / sample > 300) sample *= 2;
+                BitmapFactory.Options real = new BitmapFactory.Options();
+                real.inSampleSize = sample;
+                final Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), real);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (bitmap != null) view.setImageBitmap(scaleTo(bitmap, dp(110)));
+                    }
+                });
+            }
+        });
+    }
+
+    /** Walk the watch's own storage without a system file picker. */
+    void showFilePicker(final File dir) {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        final Dialog picker = dialog;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        box.setBackground(bg(C_CARD_HI, 24));
+
+        box.addView(dialogHead(picker, shortPath(dir)), fullWidth());
+
+        File parent = dir.getParentFile();
+        if (parent != null) {
+            Button up = roundKey("‹ 上一级", C_CARD);
+            up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+            up.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    picker.dismiss();
+                    showFilePicker(dir.getParentFile());
+                }
+            });
+            box.addView(up, lp(-1, dp(28), 0, dp(4), 0, dp(4)));
+        }
+
+        File[] entries = dir.listFiles();
+        if (entries == null) entries = new File[0];
+        ArrayList<File> dirs = new ArrayList<>();
+        ArrayList<File> files = new ArrayList<>();
+        for (File entry : entries) {
+            if (entry.getName().startsWith(".")) continue;
+            if (entry.isDirectory()) dirs.add(entry); else files.add(entry);
+        }
+        Collections.sort(dirs);
+        Collections.sort(files);
+        for (final File entry : dirs) {
+            Button row = roundKey("▸ " + entry.getName(), C_CARD);
+            row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    picker.dismiss();
+                    showFilePicker(entry);
+                }
+            });
+            box.addView(row, lp(-1, dp(26), 0, 0, 0, 3));
+        }
+        int shown = 0;
+        for (final File entry : files) {
+            if (shown >= 40) break;
+            shown += 1;
+            Button row = roundKey(entry.getName() + "  " + (entry.length() / 1024) + "K", C_CARD);
+            row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    picker.dismiss();
+                    uploadFile(entry, "file");
+                }
+            });
+            box.addView(row, lp(-1, dp(26), 0, 0, 0, 3));
+        }
+        if (dirs.isEmpty() && files.isEmpty()) box.addView(text("这个文件夹是空的", 9, C_MUTED, false));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.94f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    String shortPath(File dir) {
+        String path = dir.getAbsolutePath();
+        return path.startsWith("/sdcard") ? "手表" + path.substring(7) : path;
+    }
+
+    /** Read a file and hand it to the DSH as a prompt with its path. */
+    void uploadFile(final File file, final String kind) {
+        if (selectedId == null) return;
+        if (file.length() > 8L * 1024 * 1024) {
+            toast("文件太大（上限 8MB）");
+            return;
+        }
+        toast("上传中…");
+        final String sessionId = selectedId;
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                byte[] bytes = null;
+                String error = null;
+                try {
+                    bytes = readAllBytes(new FileInputStream(file));
+                } catch (Exception err) {
+                    error = "读不了这个文件";
+                }
+                final byte[] data = bytes;
+                final String failure = error;
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (data == null) {
+                            toast(failure);
+                            return;
+                        }
+                        JSONObject body = new JSONObject();
+                        try {
+                            body.put("session", sessionId);
+                            body.put("name", file.getName());
+                            body.put("kind", kind);
+                            body.put("data", android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP));
+                        } catch (Exception ignored) {
+                        }
+                        toast("传 " + (data.length / 1024) + "K…");
+                        api("POST", "/api/upload", body, new Callback() {
+                            @Override
+                            public void onOk(JSONObject response) {
+                                toast("已发给 DSH");
+                                refreshNow(true);
+                            }
+
+                            @Override
+                            public void onErr(String message, int status) {
+                                toast("传不上去: " + message);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    }
+
+    /** Quietly fill the chip with the session's current model. */
+    void refreshModelLabel(final Button chip) {
+        if (selectedId == null) return;
+        api("GET", "/api/models?session=" + enc(selectedId), null, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                JSONObject current = response.optJSONObject("current");
+                if (current == null) return;
+                currentModelName = nameOf(response.optJSONArray("groups"),
+                        current.optString("provider", ""), current.optString("model", ""));
+                if (chip != null) chip.setText(modelLabel());
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                /* old bridge: leave the chip as 模型 */
+            }
+        });
+    }
+
+    /** Provider tabs -> models -> reasoning effort, like the phone's sheet. */
+    JSONArray pickerGroups;
+    String pickerProvider = "";
+    String pickerModel = "";
+    String pickerEffort = "";
+    /** Scroll the sheet to the effort row right after a model tap. */
+    boolean sheetToEnd;
+
+    void showModelPicker(final Dialog composer, final Button chip) {
+        if (selectedId == null) return;
+        api("GET", "/api/models?session=" + enc(selectedId), null, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                pickerGroups = response.optJSONArray("groups");
+                JSONObject current = response.optJSONObject("current");
+                if (current != null) {
+                    pickerProvider = current.optString("provider", "");
+                    pickerModel = current.optString("model", "");
+                    pickerEffort = current.optString("reasoningEffort", "");
+                    currentModelName = nameOf(pickerGroups, pickerProvider, pickerModel);
+                    chip.setText(modelLabel());
+                }
+                if (pickerGroups == null) {
+                    toast("没有可选模型");
+                    return;
+                }
+                buildModelDialog(chip);
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                toast(status == 404 ? "服务器插件太旧，升到 0.3.4 才有模型列表" : "列不出模型: " + message);
+            }
+        });
+    }
+
+    JSONObject groupOf(JSONArray groups, String provider) {
+        if (groups == null) return null;
+        for (int i = 0; i < groups.length(); i += 1) {
+            JSONObject group = groups.optJSONObject(i);
+            if (group != null && provider.equals(group.optString("id", ""))) return group;
+        }
+        return groups.optJSONObject(0);
+    }
+
+    JSONObject modelOf(JSONObject group, String modelId) {
+        if (group == null) return null;
+        JSONArray models = group.optJSONArray("models");
+        for (int i = 0; models != null && i < models.length(); i += 1) {
+            JSONObject item = models.optJSONObject(i);
+            if (item != null && modelId.equals(item.optString("id", ""))) return item;
+        }
+        return null;
+    }
+
+    static String effortLabel(String id, String name) {
+        if ("none".equals(id) || "minimal".equals(id)) return "不思考";
+        if ("low".equals(id)) return "低";
+        if ("medium".equals(id)) return "中";
+        if ("high".equals(id)) return "高";
+        if ("max".equals(id) || "maximum".equals(id)) return "最高";
+        return name == null || name.isEmpty() ? id : name;
+    }
+
+    void buildModelDialog(final Button chip) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(10), dp(6), dp(10), dp(8));
+        LinearLayout box = body;
+
+        // Providers: two per row, so the models stay on screen without scrolling.
+        JSONArray groups = pickerGroups;
+        LinearLayout providerRow = null;
+        int placed = 0;
+        for (int i = 0; groups != null && i < groups.length(); i += 1) {
+            JSONObject group = groups.optJSONObject(i);
+            if (group == null) continue;
+            if (placed % 2 == 0) {
+                providerRow = row();
+                box.addView(providerRow, fullWidth());
+            }
+            placed += 1;
+            final String providerId = group.optString("id", "");
+            boolean on = providerId.equals(pickerProvider);
+            Button tab = roundKey(shortProvider(group.optString("name", providerId)), on ? C_ACCENT : C_CARD);
+            tab.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+            tab.setTextColor(on ? C_ON_ACCENT : C_TEXT);
+            tab.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    pickerProvider = providerId;
+                    pickerModel = "";
+                    pickerEffort = "";
+                    dialog.dismiss();
+                    buildModelDialog(chip);
+                }
+            });
+            LinearLayout.LayoutParams tabParams = lp(0, dp(24), 0, 2, 3, 2);
+            tabParams.weight = 1;
+            providerRow.addView(tab, tabParams);
+        }
+
+        // Hairline between "which provider" and "which model".
+        View divider = new View(this);
+        divider.setBackgroundColor(C_LINE);
+        box.addView(divider, lp(-1, 1, 0, 4, 0, 5));
+
+        // Models of the chosen provider
+        JSONObject current = groupOf(pickerGroups, pickerProvider);
+        if (current == null) {
+            box.addView(text("这个供应商没有可用模型", 9, C_MUTED, false));
+        } else {
+            JSONArray models = current.optJSONArray("models");
+            for (int i = 0; models != null && i < models.length(); i += 1) {
+                JSONObject model = models.optJSONObject(i);
+                if (model == null) continue;
+                final String modelId = model.optString("id", "");
+                final String providerId = current.optString("id", "");
+                boolean on = modelId.equals(pickerModel);
+                String label = model.optString("name", modelId);
+                String badge = model.optString("badge", "");
+                if (!badge.isEmpty()) label += " · " + badge;
+                LinearLayout line = row();
+                line.setPadding(dp(8), dp(4), dp(8), dp(4));
+                line.setBackground(bg(on ? C_CARD : C_CARD_HI, 12));
+                TextView name = text(label, 10, on ? C_ACCENT : C_TEXT, on);
+                name.setSingleLine(true);
+                name.setEllipsize(TextUtils.TruncateAt.END);
+                line.addView(name, weight(1));
+                line.addView(text(on ? "✓" : "", 10, C_ACCENT, true), lp(dp(12), -2, 2, 0, 0, 0));
+                line.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        // Picking a model is only half the choice: keep the sheet
+                        // open so the effort row below applies the decision.
+                        pickerProvider = providerId;
+                        pickerModel = modelId;
+                        pickerEffort = "";
+                        sheetToEnd = true;
+                        dialog.dismiss();
+                        buildModelDialog(chip);
+                    }
+                });
+                box.addView(line, lp(-1, -2, 0, 3, 0, 0));
+            }
+        }
+
+        // Reasoning effort for the selected model
+        JSONObject selected = modelOf(current, pickerModel);
+        JSONArray efforts = selected == null ? null : selected.optJSONArray("efforts");
+        if ((efforts == null || efforts.length() == 0) && selected != null) {
+            // The catalog does not advertise levels for every model; offer the
+            // standard ladder and let the host reject one it cannot serve.
+            efforts = new JSONArray();
+            for (String[] pair : new String[][]{{"none", "不思考"}, {"low", "低"}, {"high", "高"}, {"max", "最高"}}) {
+                JSONObject effort = new JSONObject();
+                try {
+                    effort.put("id", pair[0]);
+                    effort.put("name", pair[1]);
+                } catch (Exception ignored) {
+                }
+                efforts.put(effort);
+            }
+        }
+        if (selected == null && pickerModel.isEmpty()) {
+            TextView hint = text("先选一个模型，再选思考程度", 9, C_MUTED, false);
+            hint.setPadding(0, dp(4), 0, 0);
+            box.addView(hint);
+        }
+        if (efforts != null && efforts.length() > 0) {
+            box.addView(text("思考深度", 9, C_MUTED, false));
+            LinearLayout row = row();
+            for (int i = 0; i < efforts.length(); i += 1) {
+                JSONObject effort = efforts.optJSONObject(i);
+                if (effort == null) continue;
+                final String effortId = effort.optString("id", "");
+                boolean on = !pickerEffort.isEmpty()
+                        ? effortId.equals(pickerEffort)
+                        : effortId.equals(selected.optString("defaultEffort", ""));
+                Button chipBtn = roundKey(effortLabel(effortId, effort.optString("name", effortId)), on ? C_ACCENT : C_CARD);
+                chipBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+                if (on) chipBtn.setTextColor(C_ON_ACCENT);
+                chipBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dialog.dismiss();
+                        selectModel(pickerProvider, pickerModel, effortId, chip);
+                    }
+                });
+                row.addView(chipBtn, lp(0, dp(26), 0, 0, 3, 0));
+                ((LinearLayout.LayoutParams) chipBtn.getLayoutParams()).weight = 1;
+            }
+            box.addView(row, fullWidth());
+        }
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(10), dp(8), dp(10), dp(6));
+        root.setBackground(bg(C_CARD_HI, 24));
+        // The header stays put; only the list below it scrolls, so ✕ never leaves.
+        root.addView(dialogHead(dialog, "选择模型"), fullWidth());
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.addView(body, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(scroll, weightV());
+        dialog.setContentView(root);
+
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            params.width = (int) (screenWidth * 0.94f);
+            body.measure(View.MeasureSpec.makeMeasureSpec((int) (params.width * 0.92f), View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int wanted = body.getMeasuredHeight() + dp(42);
+            params.height = Math.min(wanted, (int) (screenHeight * 0.86f));
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    /** "open.bigmodel.cn" reads better as "bigmodel" on a 186dp screen. */
+    static String shortProvider(String name) {
+        if (name == null || name.isEmpty()) return "?";
+        String label = name;
+        if (label.contains(".")) {
+            String[] parts = label.split("\\.");
+            label = parts[0];
+            if (("api".equals(label) || "open".equals(label)) && parts.length > 1) label = parts[1];
+        }
+        return label.length() > 12 ? label.substring(0, 12) : label;
+    }
+
+    String nameOf(JSONArray groups, String provider, String model) {
+        if (groups == null) return model;
+        for (int i = 0; i < groups.length(); i += 1) {
+            JSONObject group = groups.optJSONObject(i);
+            if (group == null || !provider.equals(group.optString("id", ""))) continue;
+            JSONArray models = group.optJSONArray("models");
+            if (models == null) continue;
+            for (int m = 0; m < models.length(); m += 1) {
+                JSONObject item = models.optJSONObject(m);
+                if (item != null && model.equals(item.optString("id", ""))) {
+                    return item.optString("name", model);
+                }
+            }
+        }
+        return model;
+    }
+
+    void selectModel(final String provider, final String model, final String effort, final Button chip) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("session", selectedId);
+            body.put("provider", provider);
+            body.put("model", model);
+            if (effort != null && !effort.isEmpty()) body.put("reasoningEffort", effort);
+        } catch (Exception ignored) {
+        }
+        api("POST", "/api/model", body, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                JSONObject selected = response.optJSONObject("selected");
+                currentModelName = selected == null ? model : selected.optString("model", model);
+                if (chip != null) chip.setText(modelLabel());
+                toast("换好了");
+                refreshNow(true);
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                toast("换不了: " + message);
+            }
+        });
     }
 
     /** Tonal pill with a hairline outline: reads as a button on the dialog surface. */
@@ -2075,6 +3004,7 @@ public class MainActivity extends Activity {
         // The previous host's conversations must not linger under the new one.
         sessions = new JSONArray();
         lastError = "";
+        gotState = false;
         showList();
         refreshNow(true);
     }
