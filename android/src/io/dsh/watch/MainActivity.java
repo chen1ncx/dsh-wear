@@ -139,6 +139,10 @@ public class MainActivity extends Activity {
     final Set<String> finishedUnseen = new HashSet<>();
     /** Decoded previews, so a 4s poll does not refetch the same picture. */
     final Map<String, Bitmap> imageCache = new HashMap<>();
+    /** Process rows the user opened, keyed by timeline index. */
+    final Set<Integer> expandedRows = new HashSet<>();
+    /** Model shown on the composer chip. */
+    String currentModelName = "";
     final Map<String, Boolean> runningBefore = new HashMap<>();
     static final String TAG = "DSHWatch";
     static final int POLL_MS = 4000;
@@ -1249,16 +1253,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        renderActivity(session);
-
-        JSONArray messages = session.optJSONArray("messages");
-        if (messages != null) {
-            for (int i = 0; i < messages.length(); i += 1) {
-                JSONObject m = messages.optJSONObject(i);
-                if (m == null) continue;
-                detailBox.addView(bubble(m.optString("role", "a"), m.optString("text", "")));
-            }
-        }
+        renderTimeline(session);
         String activity = session.optString("activity", "");
         if (session.optBoolean("running", false)) {
             detailBox.addView(note("正在运行" + (activity.isEmpty() ? "" : " · " + activity)));
@@ -1436,6 +1431,124 @@ public class MainActivity extends Activity {
         float scale = maxSide / (float) longest;
         return Bitmap.createScaledBitmap(source, Math.max(1, (int) (width * scale)),
                 Math.max(1, (int) (height * scale)), true);
+    }
+
+    /** The conversation plus its process, the way the phone shows it. */
+    void renderTimeline(JSONObject session) {
+        JSONArray timeline = session.optJSONArray("timeline");
+        if (timeline == null) {
+            // Older bridge: no timeline, only the flat tail of messages.
+            JSONArray messages = session.optJSONArray("messages");
+            for (int i = 0; messages != null && i < messages.length(); i += 1) {
+                JSONObject message = messages.optJSONObject(i);
+                if (message == null) continue;
+                detailBox.addView(bubble(message.optString("role", "a"), message.optString("text", "")));
+            }
+            renderImages(session);
+            return;
+        }
+        for (int i = 0; i < timeline.length(); i += 1) {
+            JSONObject item = timeline.optJSONObject(i);
+            if (item == null) continue;
+            String kind = item.optString("kind", "");
+            if ("msg".equals(kind)) {
+                detailBox.addView(bubble(item.optString("role", "a"), item.optString("text", "")));
+                continue;
+            }
+            if ("think".equals(kind)) {
+                detailBox.addView(processRow(i, "思考", item.optString("text", ""), C_MUTED));
+                continue;
+            }
+            if ("tool".equals(kind)) {
+                String name = item.optString("name", "tool");
+                String arg = item.optString("arg", "");
+                boolean known = !item.isNull("ok");
+                boolean ok = item.optBoolean("ok", true);
+                String mark = known ? (ok ? "✓ " : "✗ ") : "· ";
+                int color = known ? (ok ? C_GREEN : C_RED) : C_MUTED;
+                detailBox.addView(processRow(i, mark + (arg.isEmpty() ? name : name + " · " + arg), item.optString("result", ""), color));
+                continue;
+            }
+            if ("files".equals(kind)) {
+                JSONArray files = item.optJSONArray("files");
+                final int count = files == null ? 0 : files.length();
+                if (count == 0) continue;
+                TextView row = text("产出 " + count + " 个文件 · 在 DSH 上查看", 9, C_BLUE, false);
+                row.setPadding(dp(8), dp(3), dp(8), dp(3));
+                row.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        toast("打开手机或电脑上的 DSH 查看");
+                    }
+                });
+                detailBox.addView(row);
+            }
+        }
+        renderImages(session);
+    }
+
+    /** One collapsible process line: head always visible, body on tap. */
+    View processRow(final int index, String head, final String body, int color) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(4), dp(8), dp(4));
+        box.setBackground(bg(C_CARD, 12));
+
+        LinearLayout line = row();
+        TextView label = text(head, 9, color, false);
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        line.addView(label, weight(1));
+        boolean open = expandedRows.contains(index);
+        line.addView(text(open ? "⌃" : "⌄", 9, C_MUTED, false), lp(dp(10), -2, 2, 0, 0, 0));
+        box.addView(line);
+
+        if (open && !body.isEmpty()) {
+            TextView detail = text(body, 9, C_MUTED, false);
+            detail.setPadding(0, dp(2), 0, 0);
+            box.addView(detail);
+        }
+        if (!body.isEmpty()) {
+            box.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (expandedRows.contains(index)) expandedRows.remove(index);
+                    else expandedRows.add(index);
+                    renderDetail();
+                }
+            });
+        }
+        LinearLayout.LayoutParams params = lp(-1, -2, 0, 0, 0, 2);
+        box.setLayoutParams(params);
+        return box;
+    }
+
+    /** Pictures produced or read in this session, as thumbnails. */
+    void renderImages(JSONObject session) {
+        JSONArray images = session.optJSONArray("images");
+        if (images == null || images.length() == 0) return;
+        final String sessionId = session.optString("id", "");
+        LinearLayout strip = row();
+        strip.setPadding(dp(6), dp(3), dp(6), dp(4));
+        for (int i = 0; i < images.length(); i += 1) {
+            JSONObject image = images.optJSONObject(i);
+            if (image == null) continue;
+            final String imageId = image.optString("id", "");
+            final String name = image.optString("name", "");
+            if (imageId.isEmpty()) continue;
+            ImageView thumb = new ImageView(this);
+            thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumb.setBackground(bg(C_CARD_HI, 10));
+            thumb.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showImage(sessionId, imageId, name);
+                }
+            });
+            strip.addView(thumb, lp(dp(74), dp(74), 0, 0, 6, 0));
+            loadThumb(sessionId, imageId, thumb);
+        }
+        detailBox.addView(strip);
     }
 
     void renderDetailActions(JSONObject session) {
@@ -1784,82 +1897,205 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    /** The composer: a floating capsule with +, the model, the text and send. */
     void showSayDialog() {
+        if (selectedId == null) return;
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
 
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(12), dp(14), dp(12));
-        GradientDrawable card = new GradientDrawable();
-        card.setColor(C_CARD_HI);
-        card.setCornerRadius(dp(26));
-        content.setBackground(card);
+        LinearLayout island = row();
+        island.setPadding(dp(6), dp(6), dp(6), dp(6));
+        GradientDrawable pill = bg(C_CARD_HI, 30);
+        pill.setStroke(dp(1), C_LINE);
+        island.setBackground(pill);
 
-        TextView title = text("发给 DSH", 13, C_TEXT, true);
-        title.setGravity(Gravity.CENTER);
-        content.addView(title, fullWidth());
-
-        String[] quick = {"继续", "先停一下", "汇报进展"};
-        for (final String q : quick) {
-            Button b = outlinePill(q);
-            b.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    say(q);
-                    dialog.dismiss();
-                }
-            });
-            content.addView(b, lp(-1, dp(28), 0, 5, 0, 0));
-        }
-
-        final EditText input = edit("");
-        input.setHint("自己写一句");
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        input.setSingleLine(true);
-        input.setCursorVisible(true);
-        input.setFocusableInTouchMode(true);
-        input.setShowSoftInputOnFocus(true);
-        GradientDrawable field = new GradientDrawable();
-        field.setColor(C_CARD);
-        field.setCornerRadius(dp(18));
-        field.setStroke(dp(1), C_LINE);
-        input.setBackground(field);
-        content.addView(input, lp(-1, dp(32), 0, 8, 0, 0));
-
-        LinearLayout actions = row();
-        Button cancel = smallButton("取消", C_RED);
-        cancel.setOnClickListener(new View.OnClickListener() {
+        Button plus = roundKey("＋", C_CARD);
+        plus.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                dialog.dismiss();
+                showPlusMenu(dialog);
             }
         });
-        actions.addView(cancel, weightH(30));
+        island.addView(plus, lp(dp(30), dp(30), 0, 0, 5, 0));
 
-        Button send = smallButton("发送", C_ACCENT);
+        final Button model = roundKey(modelLabel(), C_CARD);
+        model.setTextSize(TypedValue.COMPLEX_UNIT_SP, 8);
+        model.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showModelPicker(dialog, model);
+            }
+        });
+        island.addView(model, lp(dp(58), dp(30), 0, 0, 5, 0));
+
+        final EditText input = edit("");
+        input.setHint("给 DSH 发消息…");
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        input.setSingleLine(true);
+        input.setFocusableInTouchMode(true);
+        input.setShowSoftInputOnFocus(true);
+        input.setBackground(null);
+        input.setPadding(0, 0, 0, 0);
+        island.addView(input, weight(1));
+
+        Button send = roundKey("↑", C_ACCENT);
+        send.setTextColor(C_ON_ACCENT);
         send.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 String text = input.getText().toString().trim();
-                if (!text.isEmpty()) say(text);
+                if (text.isEmpty()) return;
+                say(text);
                 dialog.dismiss();
             }
         });
-        actions.addView(send, weightH(30));
-        content.addView(actions, lp(-1, -2, 0, 8, 0, 0));
+        island.addView(send, lp(dp(30), dp(30), 5, 0, 0, 0));
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(content, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        dialog.setContentView(scroll);
-
+        dialog.setContentView(island);
         Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(0x00000000));
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.96f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.BOTTOM;
+            params.y = dp(8);
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    /** Round button used inside the composer capsule. */
+    Button roundKey(String label, int color) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        button.setTextColor(C_TEXT);
+        button.setPadding(0, 0, 0, 0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setBackground(bg(color, 18));
+        button.setStateListAnimator(null);
+        return button;
+    }
+
+    String modelLabel() {
+        if (currentModelName.isEmpty()) return "模型";
+        String label = currentModelName;
+        return label.length() > 9 ? label.substring(0, 9) : label;
+    }
+
+    void showPlusMenu(final Dialog composer) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(10), dp(10), dp(10));
+        box.setBackground(bg(C_CARD_HI, 28));
+
+        Button photo = roundKey("图片", C_CARD);
+        photo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        photo.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                if (composer != null) composer.dismiss();
+                showImagePicker();
+            }
+        });
+        box.addView(photo, lp(-1, dp(32), 0, 0, 0, 6));
+
+        Button file = roundKey("文件", C_CARD);
+        file.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        file.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                if (composer != null) composer.dismiss();
+                showFilePicker(new File("/sdcard/Download"));
+            }
+        });
+        box.addView(file, lp(-1, dp(32), 0, 0, 0, 0));
+
+        dialog.setContentView(box);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.6f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    /** Newest pictures on the watch, as a small grid. */
+    void showImagePicker() {
+        final ArrayList<File> found = new ArrayList<>();
+        String[] roots = {"/sdcard/DCIM", "/sdcard/Pictures", "/sdcard/Download/DSH-Go", "/sdcard/Download"};
+        for (String root : roots) collectImages(new File(root), found, 0);
+        Collections.sort(found, new Comparator<File>() {
+            @Override
+            public int compare(File a, File b) {
+                return Long.compare(b.lastModified(), a.lastModified());
+            }
+        });
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        final Dialog picker = dialog;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(8), dp(8), dp(8));
+        box.setBackground(bg(C_CARD_HI, 24));
+
+        box.addView(text(found.isEmpty() ? "手表上没有找到图片" : "最近的图片", 10, C_MUTED, false));
+        if (found.isEmpty()) {
+            TextView tip = text("用电脑 adb push 一张到 /sdcard/Download 就行", 9, C_MUTED, false);
+            tip.setPadding(0, dp(4), 0, 0);
+            box.addView(tip);
+        }
+        int perRow = 3;
+        LinearLayout gridRow = null;
+        for (int i = 0; i < Math.min(found.size(), 18); i += 1) {
+            if (i % perRow == 0) {
+                gridRow = row();
+                box.addView(gridRow, fullWidth());
+            }
+            final File file = found.get(i);
+            ImageView cell = new ImageView(this);
+            cell.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            cell.setBackground(bg(C_CARD, 8));
+            cell.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    picker.dismiss();
+                    uploadFile(file, "image");
+                }
+            });
+            LinearLayout.LayoutParams cellParams = lp(dp(50), dp(50), 0, 0, 5, 5);
+            gridRow.addView(cell, cellParams);
+            thumbLocal(file, cell);
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
             WindowManager.LayoutParams params = window.getAttributes();
             params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
             params.height = WindowManager.LayoutParams.WRAP_CONTENT;
@@ -1867,6 +2103,307 @@ public class MainActivity extends Activity {
             window.setAttributes(params);
         }
         dialog.show();
+    }
+
+    void collectImages(File dir, ArrayList<File> out, int depth) {
+        if (dir == null || depth > 2 || out.size() >= 40) return;
+        File[] entries = dir.listFiles();
+        if (entries == null) return;
+        for (File entry : entries) {
+            if (out.size() >= 40) return;
+            if (entry.isDirectory()) {
+                if (!entry.getName().startsWith(".")) collectImages(entry, out, depth + 1);
+                continue;
+            }
+            String name = entry.getName().toLowerCase();
+            if (name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp")) {
+                out.add(entry);
+            }
+        }
+    }
+
+    void thumbLocal(final File file, final ImageView view) {
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+                int sample = 1;
+                while (options.outWidth / sample > 300) sample *= 2;
+                BitmapFactory.Options real = new BitmapFactory.Options();
+                real.inSampleSize = sample;
+                final Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), real);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (bitmap != null) view.setImageBitmap(scaleTo(bitmap, dp(110)));
+                    }
+                });
+            }
+        });
+    }
+
+    /** Walk the watch's own storage without a system file picker. */
+    void showFilePicker(final File dir) {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        final Dialog picker = dialog;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        box.setBackground(bg(C_CARD_HI, 24));
+
+        TextView head = text(shortPath(dir), 9, C_MUTED, false);
+        head.setSingleLine(true);
+        head.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        box.addView(head, fullWidth());
+
+        File parent = dir.getParentFile();
+        if (parent != null) {
+            Button up = roundKey("‹ 上一级", C_CARD);
+            up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+            up.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    picker.dismiss();
+                    showFilePicker(dir.getParentFile());
+                }
+            });
+            box.addView(up, lp(-1, dp(28), 0, dp(4), 0, dp(4)));
+        }
+
+        File[] entries = dir.listFiles();
+        if (entries == null) entries = new File[0];
+        ArrayList<File> dirs = new ArrayList<>();
+        ArrayList<File> files = new ArrayList<>();
+        for (File entry : entries) {
+            if (entry.getName().startsWith(".")) continue;
+            if (entry.isDirectory()) dirs.add(entry); else files.add(entry);
+        }
+        Collections.sort(dirs);
+        Collections.sort(files);
+        for (final File entry : dirs) {
+            Button row = roundKey("▸ " + entry.getName(), C_CARD);
+            row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    picker.dismiss();
+                    showFilePicker(entry);
+                }
+            });
+            box.addView(row, lp(-1, dp(26), 0, 0, 0, 3));
+        }
+        int shown = 0;
+        for (final File entry : files) {
+            if (shown >= 40) break;
+            shown += 1;
+            Button row = roundKey(entry.getName() + "  " + (entry.length() / 1024) + "K", C_CARD);
+            row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    picker.dismiss();
+                    uploadFile(entry, "file");
+                }
+            });
+            box.addView(row, lp(-1, dp(26), 0, 0, 0, 3));
+        }
+        if (dirs.isEmpty() && files.isEmpty()) box.addView(text("这个文件夹是空的", 9, C_MUTED, false));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.94f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    String shortPath(File dir) {
+        String path = dir.getAbsolutePath();
+        return path.startsWith("/sdcard") ? "手表" + path.substring(7) : path;
+    }
+
+    /** Read a file and hand it to the DSH as a prompt with its path. */
+    void uploadFile(final File file, final String kind) {
+        if (selectedId == null) return;
+        if (file.length() > 8L * 1024 * 1024) {
+            toast("文件太大（上限 8MB）");
+            return;
+        }
+        toast("上传中…");
+        final String sessionId = selectedId;
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                byte[] bytes = null;
+                String error = null;
+                try {
+                    bytes = readAllBytes(new FileInputStream(file));
+                } catch (Exception err) {
+                    error = "读不了这个文件";
+                }
+                final byte[] data = bytes;
+                final String failure = error;
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (data == null) {
+                            toast(failure);
+                            return;
+                        }
+                        JSONObject body = new JSONObject();
+                        try {
+                            body.put("session", sessionId);
+                            body.put("name", file.getName());
+                            body.put("kind", kind);
+                            body.put("data", android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP));
+                        } catch (Exception ignored) {
+                        }
+                        toast("传 " + (data.length / 1024) + "K…");
+                        api("POST", "/api/upload", body, new Callback() {
+                            @Override
+                            public void onOk(JSONObject response) {
+                                toast("已发给 DSH");
+                                refreshNow(true);
+                            }
+
+                            @Override
+                            public void onErr(String message, int status) {
+                                toast("传不上去: " + message);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    }
+
+    /** Ask the host which models are routable, then let the user pick one. */
+    void showModelPicker(final Dialog composer, final Button chip) {
+        if (selectedId == null) return;
+        api("GET", "/api/models?session=" + enc(selectedId), null, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                JSONArray groups = response.optJSONArray("groups");
+                JSONObject current = response.optJSONObject("current");
+                if (current != null && currentModelName.isEmpty()) {
+                    currentModelName = nameOf(groups, current.optString("provider", ""), current.optString("model", ""));
+                }
+                chip.setText(modelLabel());
+                if (groups == null) {
+                    toast("没有可选模型");
+                    return;
+                }
+                final Dialog dialog = new Dialog(MainActivity.this);
+                dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+                dialog.setCanceledOnTouchOutside(true);
+                final Dialog picker = dialog;
+                LinearLayout box = new LinearLayout(MainActivity.this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                box.setPadding(dp(10), dp(8), dp(10), dp(8));
+                box.setBackground(bg(C_CARD_HI, 24));
+                box.addView(text("换模型", 10, C_MUTED, false));
+                for (int i = 0; i < groups.length(); i += 1) {
+                    JSONObject group = groups.optJSONObject(i);
+                    if (group == null) continue;
+                    String provider = group.optString("id", "");
+                    JSONArray models = group.optJSONArray("models");
+                    if (models == null) continue;
+                    for (int m = 0; m < models.length(); m += 1) {
+                        JSONObject model = models.optJSONObject(m);
+                        if (model == null) continue;
+                        final String providerId = provider;
+                        final String modelId = model.optString("id", "");
+                        String badge = model.optString("badge", "");
+                        String label = model.optString("name", modelId) + (badge.isEmpty() ? "" : " · " + badge);
+                        Button row = roundKey(label, C_CARD);
+                        row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+                        row.setOnClickListener(new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                selectModel(providerId, modelId, chip);
+                                picker.dismiss();
+                            }
+                        });
+                        box.addView(row, lp(-1, dp(26), 0, 0, 0, 3));
+                    }
+                }
+                ScrollView scroll = new ScrollView(MainActivity.this);
+                scroll.setFillViewport(true);
+                scroll.addView(box, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                dialog.setContentView(scroll);
+                Window window = dialog.getWindow();
+                if (window != null) {
+                    window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+                    WindowManager.LayoutParams params = window.getAttributes();
+                    params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
+                    params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+                    params.gravity = Gravity.CENTER;
+                    window.setAttributes(params);
+                }
+                dialog.show();
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                toast("列不出模型: " + message);
+            }
+        });
+    }
+
+    String nameOf(JSONArray groups, String provider, String model) {
+        if (groups == null) return model;
+        for (int i = 0; i < groups.length(); i += 1) {
+            JSONObject group = groups.optJSONObject(i);
+            if (group == null || !provider.equals(group.optString("id", ""))) continue;
+            JSONArray models = group.optJSONArray("models");
+            if (models == null) continue;
+            for (int m = 0; m < models.length(); m += 1) {
+                JSONObject item = models.optJSONObject(m);
+                if (item != null && model.equals(item.optString("id", ""))) {
+                    return item.optString("name", model);
+                }
+            }
+        }
+        return model;
+    }
+
+    void selectModel(final String provider, final String model, final Button chip) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("session", selectedId);
+            body.put("provider", provider);
+            body.put("model", model);
+        } catch (Exception ignored) {
+        }
+        api("POST", "/api/model", body, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                JSONObject selected = response.optJSONObject("selected");
+                currentModelName = selected == null ? model : selected.optString("model", model);
+                chip.setText(modelLabel());
+                toast("换好了");
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                toast("换不了: " + message);
+            }
+        });
     }
 
     /** Tonal pill with a hairline outline: reads as a button on the dialog surface. */
