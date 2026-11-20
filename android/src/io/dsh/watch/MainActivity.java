@@ -2135,6 +2135,7 @@ public class MainActivity extends Activity {
     String modelLabel() {
         if (currentModelName.isEmpty()) return "模型";
         String label = currentModelName;
+        if (label.startsWith("DeepSeek-")) label = label.substring(9);
         return label.length() > 9 ? label.substring(0, 9) : label;
     }
 
@@ -2504,78 +2505,210 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** Ask the host which models are routable, then let the user pick one. */
+    /** Provider tabs -> models -> reasoning effort, like the phone's sheet. */
+    JSONArray pickerGroups;
+    String pickerProvider = "";
+    String pickerModel = "";
+    String pickerEffort = "";
+
     void showModelPicker(final Dialog composer, final Button chip) {
         if (selectedId == null) return;
         api("GET", "/api/models?session=" + enc(selectedId), null, new Callback() {
             @Override
             public void onOk(JSONObject response) {
-                JSONArray groups = response.optJSONArray("groups");
+                pickerGroups = response.optJSONArray("groups");
                 JSONObject current = response.optJSONObject("current");
-                if (current != null && currentModelName.isEmpty()) {
-                    currentModelName = nameOf(groups, current.optString("provider", ""), current.optString("model", ""));
+                if (current != null) {
+                    pickerProvider = current.optString("provider", "");
+                    pickerModel = current.optString("model", "");
+                    pickerEffort = current.optString("reasoningEffort", "");
+                    currentModelName = nameOf(pickerGroups, pickerProvider, pickerModel);
+                    chip.setText(modelLabel());
                 }
-                chip.setText(modelLabel());
-                if (groups == null) {
+                if (pickerGroups == null) {
                     toast("没有可选模型");
                     return;
                 }
-                final Dialog dialog = new Dialog(MainActivity.this);
-                dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-                dialog.setCanceledOnTouchOutside(true);
-                final Dialog picker = dialog;
-                LinearLayout box = new LinearLayout(MainActivity.this);
-                box.setOrientation(LinearLayout.VERTICAL);
-                box.setPadding(dp(10), dp(8), dp(10), dp(8));
-                box.setBackground(bg(C_CARD_HI, 24));
-                box.addView(dialogHead(picker, "换模型"), fullWidth());
-                for (int i = 0; i < groups.length(); i += 1) {
-                    JSONObject group = groups.optJSONObject(i);
-                    if (group == null) continue;
-                    String provider = group.optString("id", "");
-                    JSONArray models = group.optJSONArray("models");
-                    if (models == null) continue;
-                    for (int m = 0; m < models.length(); m += 1) {
-                        JSONObject model = models.optJSONObject(m);
-                        if (model == null) continue;
-                        final String providerId = provider;
-                        final String modelId = model.optString("id", "");
-                        String badge = model.optString("badge", "");
-                        String label = model.optString("name", modelId) + (badge.isEmpty() ? "" : " · " + badge);
-                        Button row = roundKey(label, C_CARD);
-                        row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
-                        row.setOnClickListener(new View.OnClickListener() {
-                            @Override
-                            public void onClick(View v) {
-                                selectModel(providerId, modelId, chip);
-                                picker.dismiss();
-                            }
-                        });
-                        box.addView(row, lp(-1, dp(26), 0, 0, 0, 3));
-                    }
-                }
-                ScrollView scroll = new ScrollView(MainActivity.this);
-                scroll.setFillViewport(true);
-                scroll.addView(box, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                dialog.setContentView(scroll);
-                Window window = dialog.getWindow();
-                if (window != null) {
-                    window.setBackgroundDrawable(new ColorDrawable(0x00000000));
-                    WindowManager.LayoutParams params = window.getAttributes();
-                    params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
-                    params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-                    params.gravity = Gravity.CENTER;
-                    window.setAttributes(params);
-                }
-                dialog.show();
+                buildModelDialog(chip);
             }
 
             @Override
             public void onErr(String message, int status) {
-                toast(status == 404 ? "服务器插件太旧，升到 0.3.0 才有模型列表" : "列不出模型: " + message);
+                toast(status == 404 ? "服务器插件太旧，升到 0.3.4 才有模型列表" : "列不出模型: " + message);
             }
         });
+    }
+
+    JSONObject groupOf(JSONArray groups, String provider) {
+        if (groups == null) return null;
+        for (int i = 0; i < groups.length(); i += 1) {
+            JSONObject group = groups.optJSONObject(i);
+            if (group != null && provider.equals(group.optString("id", ""))) return group;
+        }
+        return groups.optJSONObject(0);
+    }
+
+    JSONObject modelOf(JSONObject group, String modelId) {
+        if (group == null) return null;
+        JSONArray models = group.optJSONArray("models");
+        for (int i = 0; models != null && i < models.length(); i += 1) {
+            JSONObject item = models.optJSONObject(i);
+            if (item != null && modelId.equals(item.optString("id", ""))) return item;
+        }
+        return null;
+    }
+
+    static String effortLabel(String id, String name) {
+        if ("none".equals(id) || "minimal".equals(id)) return "不思考";
+        if ("low".equals(id)) return "低";
+        if ("medium".equals(id)) return "中";
+        if ("high".equals(id)) return "高";
+        if ("max".equals(id) || "maximum".equals(id)) return "最高";
+        return name == null || name.isEmpty() ? id : name;
+    }
+
+    void buildModelDialog(final Button chip) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        box.setBackground(bg(C_CARD_HI, 24));
+        box.addView(dialogHead(dialog, "选择模型"), fullWidth());
+
+        // Providers: a sideways scroller, never squeezed into one line.
+        LinearLayout providers = row();
+        HorizontalScrollView providerScroll = new HorizontalScrollView(this);
+        providerScroll.setHorizontalScrollBarEnabled(false);
+        for (int i = 0; pickerGroups != null && i < pickerGroups.length(); i += 1) {
+            JSONObject group = pickerGroups.optJSONObject(i);
+            if (group == null) continue;
+            final String providerId = group.optString("id", "");
+            boolean on = providerId.equals(pickerProvider);
+            Button tab = roundKey(shortProvider(group.optString("name", providerId)), on ? C_ACCENT : C_CARD);
+            tab.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+            if (on) tab.setTextColor(C_ON_ACCENT);
+            tab.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    pickerProvider = providerId;
+                    pickerModel = "";
+                    pickerEffort = "";
+                    dialog.dismiss();
+                    buildModelDialog(chip);
+                }
+            });
+            providers.addView(tab, lp(-2, dp(26), 0, 0, 4, 0));
+        }
+        providerScroll.addView(providers, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        box.addView(providerScroll, fullWidth());
+
+        // Models of the chosen provider
+        JSONObject group = groupOf(pickerGroups, pickerProvider);
+        if (group == null) {
+            box.addView(text("这个供应商没有可用模型", 9, C_MUTED, false));
+        } else {
+            JSONArray models = group.optJSONArray("models");
+            for (int i = 0; models != null && i < models.length(); i += 1) {
+                JSONObject model = models.optJSONObject(i);
+                if (model == null) continue;
+                final String modelId = model.optString("id", "");
+                final String providerId = group.optString("id", "");
+                boolean on = modelId.equals(pickerModel);
+                String label = model.optString("name", modelId);
+                String badge = model.optString("badge", "");
+                if (!badge.isEmpty()) label += " · " + badge;
+                LinearLayout line = row();
+                line.setPadding(dp(8), dp(4), dp(8), dp(4));
+                line.setBackground(bg(on ? C_CARD : C_CARD_HI, 12));
+                TextView name = text(label, 10, on ? C_ACCENT : C_TEXT, on);
+                name.setSingleLine(true);
+                name.setEllipsize(TextUtils.TruncateAt.END);
+                line.addView(name, weight(1));
+                line.addView(text(on ? "✓" : "", 10, C_ACCENT, true), lp(dp(12), -2, 2, 0, 0, 0));
+                line.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dialog.dismiss();
+                        pickerProvider = providerId;
+                        pickerModel = modelId;
+                        pickerEffort = "";
+                        selectModel(providerId, modelId, "", chip);
+                    }
+                });
+                box.addView(line, lp(-1, -2, 0, 3, 0, 0));
+            }
+        }
+
+        // Reasoning effort for the selected model
+        JSONObject selected = modelOf(group, pickerModel);
+        JSONArray efforts = selected == null ? null : selected.optJSONArray("efforts");
+        if ((efforts == null || efforts.length() == 0) && selected != null) {
+            // The catalog does not advertise levels for every model; offer the
+            // standard ladder and let the host reject one it cannot serve.
+            efforts = new JSONArray();
+            for (String[] pair : new String[][]{{"none", "不思考"}, {"low", "低"}, {"high", "高"}, {"max", "最高"}}) {
+                JSONObject effort = new JSONObject();
+                try {
+                    effort.put("id", pair[0]);
+                    effort.put("name", pair[1]);
+                } catch (Exception ignored) {
+                }
+                efforts.put(effort);
+            }
+        }
+        if (efforts != null && efforts.length() > 0) {
+            box.addView(text("思考深度", 9, C_MUTED, false));
+            LinearLayout row = row();
+            for (int i = 0; i < efforts.length(); i += 1) {
+                JSONObject effort = efforts.optJSONObject(i);
+                if (effort == null) continue;
+                final String effortId = effort.optString("id", "");
+                boolean on = !pickerEffort.isEmpty()
+                        ? effortId.equals(pickerEffort)
+                        : effortId.equals(selected.optString("defaultEffort", ""));
+                Button chipBtn = roundKey(effortLabel(effortId, effort.optString("name", effortId)), on ? C_ACCENT : C_CARD);
+                chipBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+                if (on) chipBtn.setTextColor(C_ON_ACCENT);
+                chipBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dialog.dismiss();
+                        selectModel(pickerProvider, pickerModel, effortId, chip);
+                    }
+                });
+                row.addView(chipBtn, lp(0, dp(26), 0, 0, 3, 0));
+                ((LinearLayout.LayoutParams) chipBtn.getLayoutParams()).weight = 1;
+            }
+            box.addView(row, fullWidth());
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(scroll);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.94f);
+            // Fixed height: the sheet scrolls inside instead of growing past the screen.
+            params.height = (int) (getResources().getDisplayMetrics().heightPixels * 0.84f);
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    static String shortProvider(String name) {
+        if (name == null) return "?";
+        String shortName = name;
+        if (shortName.length() > 9) shortName = shortName.substring(0, 9);
+        return shortName;
     }
 
     String nameOf(JSONArray groups, String provider, String model) {
@@ -2595,12 +2728,13 @@ public class MainActivity extends Activity {
         return model;
     }
 
-    void selectModel(final String provider, final String model, final Button chip) {
+    void selectModel(final String provider, final String model, final String effort, final Button chip) {
         JSONObject body = new JSONObject();
         try {
             body.put("session", selectedId);
             body.put("provider", provider);
             body.put("model", model);
+            if (effort != null && !effort.isEmpty()) body.put("reasoningEffort", effort);
         } catch (Exception ignored) {
         }
         api("POST", "/api/model", body, new Callback() {
@@ -2608,8 +2742,9 @@ public class MainActivity extends Activity {
             public void onOk(JSONObject response) {
                 JSONObject selected = response.optJSONObject("selected");
                 currentModelName = selected == null ? model : selected.optString("model", model);
-                chip.setText(modelLabel());
+                if (chip != null) chip.setText(modelLabel());
                 toast("换好了");
+                refreshNow(true);
             }
 
             @Override
