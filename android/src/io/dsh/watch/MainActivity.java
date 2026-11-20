@@ -2578,18 +2578,23 @@ public class MainActivity extends Activity {
         box.setBackground(bg(C_CARD_HI, 24));
         box.addView(dialogHead(dialog, "选择模型"), fullWidth());
 
-        // Providers: a sideways scroller, never squeezed into one line.
-        LinearLayout providers = row();
-        HorizontalScrollView providerScroll = new HorizontalScrollView(this);
-        providerScroll.setHorizontalScrollBarEnabled(false);
-        for (int i = 0; pickerGroups != null && i < pickerGroups.length(); i += 1) {
-            JSONObject group = pickerGroups.optJSONObject(i);
+        // Providers: two per row, so the models stay on screen without scrolling.
+        JSONArray groups = pickerGroups;
+        LinearLayout providerRow = null;
+        int placed = 0;
+        for (int i = 0; groups != null && i < groups.length(); i += 1) {
+            JSONObject group = groups.optJSONObject(i);
             if (group == null) continue;
+            if (placed % 2 == 0) {
+                providerRow = row();
+                box.addView(providerRow, fullWidth());
+            }
+            placed += 1;
             final String providerId = group.optString("id", "");
             boolean on = providerId.equals(pickerProvider);
             Button tab = roundKey(shortProvider(group.optString("name", providerId)), on ? C_ACCENT : C_CARD);
             tab.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
-            if (on) tab.setTextColor(C_ON_ACCENT);
+            tab.setTextColor(on ? C_ON_ACCENT : C_TEXT);
             tab.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -2600,23 +2605,27 @@ public class MainActivity extends Activity {
                     buildModelDialog(chip);
                 }
             });
-            providers.addView(tab, lp(-2, dp(26), 0, 0, 4, 0));
+            LinearLayout.LayoutParams tabParams = lp(0, dp(24), 0, 2, 3, 2);
+            tabParams.weight = 1;
+            providerRow.addView(tab, tabParams);
         }
-        providerScroll.addView(providers, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        box.addView(providerScroll, fullWidth());
+
+        // Hairline between "which provider" and "which model".
+        View divider = new View(this);
+        divider.setBackgroundColor(C_LINE);
+        box.addView(divider, lp(-1, 1, 0, 4, 0, 5));
 
         // Models of the chosen provider
-        JSONObject group = groupOf(pickerGroups, pickerProvider);
-        if (group == null) {
+        JSONObject current = groupOf(pickerGroups, pickerProvider);
+        if (current == null) {
             box.addView(text("这个供应商没有可用模型", 9, C_MUTED, false));
         } else {
-            JSONArray models = group.optJSONArray("models");
+            JSONArray models = current.optJSONArray("models");
             for (int i = 0; models != null && i < models.length(); i += 1) {
                 JSONObject model = models.optJSONObject(i);
                 if (model == null) continue;
                 final String modelId = model.optString("id", "");
-                final String providerId = group.optString("id", "");
+                final String providerId = current.optString("id", "");
                 boolean on = modelId.equals(pickerModel);
                 String label = model.optString("name", modelId);
                 String badge = model.optString("badge", "");
@@ -2644,7 +2653,7 @@ public class MainActivity extends Activity {
         }
 
         // Reasoning effort for the selected model
-        JSONObject selected = modelOf(group, pickerModel);
+        JSONObject selected = modelOf(current, pickerModel);
         JSONArray efforts = selected == null ? null : selected.optJSONArray("efforts");
         if ((efforts == null || efforts.length() == 0) && selected != null) {
             // The catalog does not advertise levels for every model; offer the
@@ -2709,11 +2718,16 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    /** "open.bigmodel.cn" reads better as "bigmodel" on a 186dp screen. */
     static String shortProvider(String name) {
-        if (name == null) return "?";
-        String shortName = name;
-        if (shortName.length() > 9) shortName = shortName.substring(0, 9);
-        return shortName;
+        if (name == null || name.isEmpty()) return "?";
+        String label = name;
+        if (label.contains(".")) {
+            String[] parts = label.split("\\.");
+            label = parts[0];
+            if (("api".equals(label) || "open".equals(label)) && parts.length > 1) label = parts[1];
+        }
+        return label.length() > 12 ? label.substring(0, 12) : label;
     }
 
     String nameOf(JSONArray groups, String provider, String model) {
