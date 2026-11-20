@@ -2517,6 +2517,8 @@ public class MainActivity extends Activity {
     String pickerProvider = "";
     String pickerModel = "";
     String pickerEffort = "";
+    /** Scroll the sheet to the effort row right after a model tap. */
+    boolean sheetToEnd;
 
     void showModelPicker(final Dialog composer, final Button chip) {
         if (selectedId == null) return;
@@ -2647,11 +2649,14 @@ public class MainActivity extends Activity {
                 line.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        dialog.dismiss();
+                        // Picking a model is only half the choice: keep the sheet
+                        // open so the effort row below applies the decision.
                         pickerProvider = providerId;
                         pickerModel = modelId;
                         pickerEffort = "";
-                        selectModel(providerId, modelId, "", chip);
+                        sheetToEnd = true;
+                        dialog.dismiss();
+                        buildModelDialog(chip);
                     }
                 });
                 box.addView(line, lp(-1, -2, 0, 3, 0, 0));
@@ -2674,6 +2679,11 @@ public class MainActivity extends Activity {
                 }
                 efforts.put(effort);
             }
+        }
+        if (selected == null && pickerModel.isEmpty()) {
+            TextView hint = text("先选一个模型，再选思考程度", 9, C_MUTED, false);
+            hint.setPadding(0, dp(4), 0, 0);
+            box.addView(hint);
         }
         if (efforts != null && efforts.length() > 0) {
             box.addView(text("思考深度", 9, C_MUTED, false));
