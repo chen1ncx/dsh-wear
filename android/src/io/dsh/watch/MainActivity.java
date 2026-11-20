@@ -1462,9 +1462,14 @@ public class MainActivity extends Activity {
 
     /** The conversation plus its process, the way the phone shows it. */
     void renderTimeline(JSONObject session) {
-        JSONArray timeline = session.optJSONArray("timeline");
-        if (timeline == null) {
-            // Older bridge: no timeline, only the flat tail of messages.
+        JSONArray blocks = session.optJSONArray("blocks");
+        if (blocks == null) {
+            JSONArray legacy = session.optJSONArray("timeline");
+            if (legacy != null) {
+                renderFlatTimeline(legacy);
+                renderImages(session);
+                return;
+            }
             JSONArray messages = session.optJSONArray("messages");
             for (int i = 0; messages != null && i < messages.length(); i += 1) {
                 JSONObject message = messages.optJSONObject(i);
@@ -1474,30 +1479,16 @@ public class MainActivity extends Activity {
             renderImages(session);
             return;
         }
-        for (int i = 0; i < timeline.length(); i += 1) {
-            JSONObject item = timeline.optJSONObject(i);
-            if (item == null) continue;
-            String kind = item.optString("kind", "");
+        for (int i = 0; i < blocks.length(); i += 1) {
+            JSONObject block = blocks.optJSONObject(i);
+            if (block == null) continue;
+            String kind = block.optString("kind", "");
             if ("msg".equals(kind)) {
-                detailBox.addView(bubble(item.optString("role", "a"), item.optString("text", "")));
-                continue;
-            }
-            if ("think".equals(kind)) {
-                detailBox.addView(processRow(i, "思考", item.optString("text", ""), C_MUTED));
-                continue;
-            }
-            if ("tool".equals(kind)) {
-                String name = item.optString("name", "tool");
-                String arg = item.optString("arg", "");
-                boolean known = !item.isNull("ok");
-                boolean ok = item.optBoolean("ok", true);
-                String mark = known ? (ok ? "✓ " : "✗ ") : "· ";
-                int color = known ? (ok ? C_GREEN : C_RED) : C_MUTED;
-                detailBox.addView(processRow(i, mark + (arg.isEmpty() ? name : name + " · " + arg), item.optString("result", ""), color));
-                continue;
-            }
-            if ("files".equals(kind)) {
-                JSONArray files = item.optJSONArray("files");
+                detailBox.addView(bubble(block.optString("role", "a"), block.optString("text", "")));
+            } else if ("process".equals(kind)) {
+                detailBox.addView(processBlock(i, block));
+            } else if ("files".equals(kind)) {
+                JSONArray files = block.optJSONArray("files");
                 final int count = files == null ? 0 : files.length();
                 if (count == 0) continue;
                 TextView row = text("产出 " + count + " 个文件 · 在 DSH 上查看", 9, C_BLUE, false);
@@ -1512,6 +1503,90 @@ public class MainActivity extends Activity {
             }
         }
         renderImages(session);
+    }
+
+    /** Bridge 0.3.0 layout: a flat list of thinking / tool / message entries. */
+    void renderFlatTimeline(JSONArray timeline) {
+        for (int i = 0; i < timeline.length(); i += 1) {
+            JSONObject item = timeline.optJSONObject(i);
+            if (item == null) continue;
+            String kind = item.optString("kind", "");
+            if ("msg".equals(kind)) {
+                detailBox.addView(bubble(item.optString("role", "a"), item.optString("text", "")));
+            } else if ("think".equals(kind)) {
+                detailBox.addView(processRow(i, "思考 · " + firstLine(item.optString("text", "")), item.optString("text", ""), C_MUTED));
+            } else if ("tool".equals(kind)) {
+                String name = item.optString("name", "tool");
+                String arg = item.optString("arg", "");
+                boolean known = !item.isNull("ok");
+                boolean ok = item.optBoolean("ok", true);
+                String mark = known ? (ok ? "✓ " : "✗ ") : "· ";
+                int color = known ? (ok ? C_GREEN : C_RED) : C_MUTED;
+                detailBox.addView(processRow(i, mark + name + (arg.isEmpty() ? "" : " · " + arg), item.optString("result", ""), color));
+            }
+        }
+    }
+
+    /** One turn's tool work: a summary line while collapsed, the rows when open. */
+    View processBlock(final int index, JSONObject block) {
+        boolean running = block.optBoolean("running", false);
+        int toolCount = block.optInt("toolCount", 0);
+        boolean open = running || expandedRows.contains(index);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(5), dp(8), dp(5));
+        box.setBackground(bg(C_CARD, 12));
+
+        LinearLayout head = row();
+        String label = running
+                ? "进行中 · " + toolCount + " 次工具调用"
+                : "已完成 · " + toolCount + " 次工具调用";
+        head.addView(text(label, 9, running ? C_ACCENT : C_MUTED, false), weight(1));
+        head.addView(text(open ? "⌃" : "⌄", 9, C_MUTED, false), lp(dp(10), -2, 2, 0, 0, 0));
+        box.addView(head);
+
+        if (open) {
+            JSONArray items = block.optJSONArray("items");
+            for (int i = 0; items != null && i < items.length(); i += 1) {
+                JSONObject item = items.optJSONObject(i);
+                if (item == null) continue;
+                String kind = item.optString("kind", "");
+                if ("think".equals(kind)) {
+                    box.addView(processRow(index * 1000 + i, "思考 · " + firstLine(item.optString("text", "")), item.optString("text", ""), C_MUTED));
+                } else if ("tool".equals(kind)) {
+                    String name = item.optString("name", "tool");
+                    String arg = item.optString("arg", "");
+                    boolean known = !item.isNull("ok");
+                    boolean ok = item.optBoolean("ok", true);
+                    String mark = known ? (ok ? "✓ " : "✗ ") : "· ";
+                    int color = known ? (ok ? C_GREEN : C_RED) : C_MUTED;
+                    String body = item.optString("result", "");
+                    box.addView(processRow(index * 1000 + i, mark + name + (arg.isEmpty() ? "" : " · " + arg), body, color));
+                }
+            }
+        }
+        if (!running) {
+            box.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (expandedRows.contains(index)) expandedRows.remove(index);
+                    else expandedRows.add(index);
+                    renderDetail();
+                }
+            });
+        }
+        LinearLayout.LayoutParams params = lp(-1, -2, 0, 0, 0, 3);
+        box.setLayoutParams(params);
+        return box;
+    }
+
+    static String firstLine(String text) {
+        if (text == null) return "";
+        String line = text.trim();
+        int cut = line.indexOf('\n');
+        if (cut > 0) line = line.substring(0, cut);
+        return line.length() > 28 ? line.substring(0, 28) + "…" : line;
     }
 
     /** One collapsible process line: head always visible, body on tap. */
@@ -1996,6 +2071,25 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    /** Header row with a ✕ that closes the dialog: the watch has no easy outside tap. */
+    LinearLayout dialogHead(final Dialog dialog, String label) {
+        LinearLayout head = row();
+        TextView title = text(label, 9, C_MUTED, false);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        head.addView(title, weight(1));
+        Button close = roundKey("✕", C_CARD);
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        head.addView(close, lp(dp(22), dp(22), 4, 0, 0, 0));
+        return head;
+    }
+
     /** Round button used inside the composer capsule. */
     Button roundKey(String label, int color) {
         Button button = new Button(this);
@@ -2038,7 +2132,8 @@ public class MainActivity extends Activity {
                 ensureStorage(1);
             }
         });
-        box.addView(photo, lp(-1, dp(32), 0, 0, 0, 6));
+        box.addView(dialogHead(dialog, "发送"), fullWidth());
+        box.addView(photo, lp(-1, dp(32), 0, 4, 0, 6));
 
         Button file = roundKey("文件", C_CARD);
         file.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
@@ -2131,7 +2226,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(8), dp(8), dp(8), dp(8));
         box.setBackground(bg(C_CARD_HI, 24));
 
-        box.addView(text(found.isEmpty() ? "手表上没有找到图片" : "最近的图片 · " + found.size(), 10, C_MUTED, false));
+        box.addView(dialogHead(picker, found.isEmpty() ? "没有找到图片" : "最近的图片 · " + found.size()), fullWidth());
         if (found.isEmpty()) {
             TextView tip = text("用电脑 adb push 一张到 /sdcard/Download 就行", 9, C_MUTED, false);
             tip.setPadding(0, dp(4), 0, 0);
@@ -2232,10 +2327,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(10), dp(8), dp(10), dp(8));
         box.setBackground(bg(C_CARD_HI, 24));
 
-        TextView head = text(shortPath(dir), 9, C_MUTED, false);
-        head.setSingleLine(true);
-        head.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        box.addView(head, fullWidth());
+        box.addView(dialogHead(picker, shortPath(dir)), fullWidth());
 
         File parent = dir.getParentFile();
         if (parent != null) {
@@ -2411,7 +2503,7 @@ public class MainActivity extends Activity {
                 box.setOrientation(LinearLayout.VERTICAL);
                 box.setPadding(dp(10), dp(8), dp(10), dp(8));
                 box.setBackground(bg(C_CARD_HI, 24));
-                box.addView(text("换模型", 10, C_MUTED, false));
+                box.addView(dialogHead(picker, "换模型"), fullWidth());
                 for (int i = 0; i < groups.length(); i += 1) {
                     JSONObject group = groups.optJSONObject(i);
                     if (group == null) continue;
