@@ -145,6 +145,8 @@ public class MainActivity extends Activity {
     final Set<Integer> expandedRows = new HashSet<>();
     /** Model shown on the composer chip. */
     String currentModelName = "";
+    /** True once this host has answered at least once; before that an empty list means "loading". */
+    boolean gotState;
     static final int REQ_STORAGE = 7;
     /** 1 = image picker, 2 = file picker; resumed after the permission answer. */
     int pendingPicker = 0;
@@ -386,6 +388,7 @@ public class MainActivity extends Activity {
                 refreshing = false;
                 if (mySeq != seqCounter) return;
                 state = body;
+                gotState = true;
                 lastOkAt = System.currentTimeMillis();
                 lastError = "";
                 try {
@@ -1160,14 +1163,18 @@ public class MainActivity extends Activity {
             listEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
             if (empty) {
                 String host = shortHost(baseUrl == null ? "" : baseUrl);
-                listEmpty.setText(lastError.isEmpty()
-                        ? "这台还没有对话\n点 ＋ 新建一个"
-                        : "连不上这台\n" + host + "\n在「设备」里换一台\n或在配对页里重新配对");
+                if (!lastError.isEmpty()) {
+                    listEmpty.setText("连不上这台\n" + host + "\n在「设备」里换一台\n或在配对页里重新配对");
+                } else if (!gotState) {
+                    listEmpty.setText("读取中…");
+                } else {
+                    listEmpty.setText("这台还没有对话\n点 ＋ 新建一个");
+                }
             }
         }
         if (listStatus != null) {
             if (rows.isEmpty()) {
-                listStatus.setText(lastError.isEmpty() ? "没有会话" : "连不上");
+                listStatus.setText(!lastError.isEmpty() ? "连不上" : (gotState ? "没有会话" : "读取中…"));
             } else {
                 int waiting = 0;
                 for (Session s : rows) waiting += s.pending;
@@ -2572,11 +2579,10 @@ public class MainActivity extends Activity {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
 
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(10), dp(8), dp(10), dp(8));
-        box.setBackground(bg(C_CARD_HI, 24));
-        box.addView(dialogHead(dialog, "选择模型"), fullWidth());
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(10), dp(6), dp(10), dp(8));
+        LinearLayout box = body;
 
         // Providers: two per row, so the models stay on screen without scrolling.
         JSONArray groups = pickerGroups;
@@ -2695,11 +2701,21 @@ public class MainActivity extends Activity {
             box.addView(row, fullWidth());
         }
 
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(10), dp(8), dp(10), dp(6));
+        root.setBackground(bg(C_CARD_HI, 24));
+        // The header stays put; only the list below it scrolls, so ✕ never leaves.
+        root.addView(dialogHead(dialog, "选择模型"), fullWidth());
+
         ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(box, new FrameLayout.LayoutParams(
+        scroll.setFillViewport(false);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.addView(body, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        dialog.setContentView(scroll);
+        root.addView(scroll, weightV());
+        dialog.setContentView(root);
+
         Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(0x00000000));
@@ -2707,11 +2723,10 @@ public class MainActivity extends Activity {
             int screenWidth = getResources().getDisplayMetrics().widthPixels;
             int screenHeight = getResources().getDisplayMetrics().heightPixels;
             params.width = (int) (screenWidth * 0.94f);
-            // Snug to the content, but never taller than the screen: measure the
-            // box first so a short list does not leave a big empty sheet.
-            box.measure(View.MeasureSpec.makeMeasureSpec(params.width, View.MeasureSpec.AT_MOST),
+            body.measure(View.MeasureSpec.makeMeasureSpec((int) (params.width * 0.92f), View.MeasureSpec.AT_MOST),
                     View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-            params.height = Math.min(box.getMeasuredHeight() + dp(6), (int) (screenHeight * 0.86f));
+            int wanted = body.getMeasuredHeight() + dp(42);
+            params.height = Math.min(wanted, (int) (screenHeight * 0.86f));
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
         }
@@ -2979,6 +2994,7 @@ public class MainActivity extends Activity {
         // The previous host's conversations must not linger under the new one.
         sessions = new JSONArray();
         lastError = "";
+        gotState = false;
         showList();
         refreshNow(true);
     }
