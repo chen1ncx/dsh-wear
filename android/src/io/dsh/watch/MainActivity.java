@@ -1,6 +1,7 @@
 package io.dsh.watch;
 
 import android.app.Activity;
+import android.Manifest;
 import android.app.Dialog;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -9,6 +10,7 @@ import android.app.PendingIntent;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
@@ -143,6 +145,9 @@ public class MainActivity extends Activity {
     final Set<Integer> expandedRows = new HashSet<>();
     /** Model shown on the composer chip. */
     String currentModelName = "";
+    static final int REQ_STORAGE = 7;
+    /** 1 = image picker, 2 = file picker; resumed after the permission answer. */
+    int pendingPicker = 0;
     final Map<String, Boolean> runningBefore = new HashMap<>();
     static final String TAG = "DSHWatch";
     static final int POLL_MS = 4000;
@@ -1952,6 +1957,7 @@ public class MainActivity extends Activity {
         });
         island.addView(send, lp(dp(30), dp(30), 5, 0, 0, 0));
 
+        if (currentModelName.isEmpty()) refreshModelLabel(model);
         dialog.setContentView(island);
         Window window = dialog.getWindow();
         if (window != null) {
@@ -2007,7 +2013,7 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 dialog.dismiss();
                 if (composer != null) composer.dismiss();
-                showImagePicker();
+                ensureStorage(1);
             }
         });
         box.addView(photo, lp(-1, dp(32), 0, 0, 0, 6));
@@ -2019,7 +2025,7 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 dialog.dismiss();
                 if (composer != null) composer.dismiss();
-                showFilePicker(new File("/sdcard/Download"));
+                ensureStorage(2);
             }
         });
         box.addView(file, lp(-1, dp(32), 0, 0, 0, 0));
@@ -2037,18 +2043,62 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
-    /** Newest pictures on the watch, as a small grid. */
+    boolean hasStorage() {
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Ask for storage once, then open whichever picker was requested. */
+    void ensureStorage(int which) {
+        if (hasStorage()) {
+            if (which == 1) showImagePicker(); else showFilePicker(new File("/sdcard/Download"));
+            return;
+        }
+        pendingPicker = which;
+        requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE);
+        toast("先允许读取存储");
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(code, permissions, results);
+        if (code != REQ_STORAGE) return;
+        boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+        int which = pendingPicker;
+        pendingPicker = 0;
+        if (!granted) {
+            toast("没有存储权限，读不到图片和文件");
+            return;
+        }
+        if (which == 1) showImagePicker();
+        else if (which == 2) showFilePicker(new File("/sdcard/Download"));
+    }
+
+    /** Newest pictures anywhere on the watch, as a small grid. */
     void showImagePicker() {
-        final ArrayList<File> found = new ArrayList<>();
-        String[] roots = {"/sdcard/DCIM", "/sdcard/Pictures", "/sdcard/Download/DSH-Go", "/sdcard/Download"};
-        for (String root : roots) collectImages(new File(root), found, 0);
-        Collections.sort(found, new Comparator<File>() {
+        toast("找图片…");
+        net.execute(new Runnable() {
             @Override
-            public int compare(File a, File b) {
-                return Long.compare(b.lastModified(), a.lastModified());
+            public void run() {
+                final ArrayList<File> found = new ArrayList<>();
+                collectImages(new File("/sdcard"), found, 0);
+                if (found.isEmpty()) collectImages(new File("/storage/emulated/0"), found, 0);
+                Collections.sort(found, new Comparator<File>() {
+                    @Override
+                    public int compare(File a, File b) {
+                        return Long.compare(b.lastModified(), a.lastModified());
+                    }
+                });
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        showImageGrid(found);
+                    }
+                });
             }
         });
+    }
 
+    void showImageGrid(final ArrayList<File> found) {
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
@@ -2059,7 +2109,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(8), dp(8), dp(8), dp(8));
         box.setBackground(bg(C_CARD_HI, 24));
 
-        box.addView(text(found.isEmpty() ? "手表上没有找到图片" : "最近的图片", 10, C_MUTED, false));
+        box.addView(text(found.isEmpty() ? "手表上没有找到图片" : "最近的图片 · " + found.size(), 10, C_MUTED, false));
         if (found.isEmpty()) {
             TextView tip = text("用电脑 adb push 一张到 /sdcard/Download 就行", 9, C_MUTED, false);
             tip.setPadding(0, dp(4), 0, 0);
@@ -2083,8 +2133,7 @@ public class MainActivity extends Activity {
                     uploadFile(file, "image");
                 }
             });
-            LinearLayout.LayoutParams cellParams = lp(dp(50), dp(50), 0, 0, 5, 5);
-            gridRow.addView(cell, cellParams);
+            gridRow.addView(cell, lp(dp(50), dp(50), 0, 0, 5, 5));
             thumbLocal(file, cell);
         }
 
@@ -2106,18 +2155,23 @@ public class MainActivity extends Activity {
     }
 
     void collectImages(File dir, ArrayList<File> out, int depth) {
-        if (dir == null || depth > 2 || out.size() >= 40) return;
+        if (dir == null || depth > 6 || out.size() >= 40) return;
         File[] entries = dir.listFiles();
         if (entries == null) return;
         for (File entry : entries) {
             if (out.size() >= 40) return;
+            String name = entry.getName();
+            if (name.startsWith(".")) continue;
             if (entry.isDirectory()) {
-                if (!entry.getName().startsWith(".")) collectImages(entry, out, depth + 1);
+                // App-private trees hold thousands of thumbnails and nothing useful.
+                if (name.equals("Android") || name.equals("LOST.DIR") || name.equals("DCIM-cover")) continue;
+                collectImages(entry, out, depth + 1);
                 continue;
             }
-            String name = entry.getName().toLowerCase();
-            if (name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp")) {
-                out.add(entry);
+            String lower = name.toLowerCase();
+            if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png")
+                    || lower.endsWith(".webp") || lower.endsWith(".gif") || lower.endsWith(".bmp")) {
+                if (entry.length() > 64) out.add(entry);
             }
         }
     }
@@ -2291,6 +2345,26 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** Quietly fill the chip with the session's current model. */
+    void refreshModelLabel(final Button chip) {
+        if (selectedId == null) return;
+        api("GET", "/api/models?session=" + enc(selectedId), null, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                JSONObject current = response.optJSONObject("current");
+                if (current == null) return;
+                currentModelName = nameOf(response.optJSONArray("groups"),
+                        current.optString("provider", ""), current.optString("model", ""));
+                if (chip != null) chip.setText(modelLabel());
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                /* old bridge: leave the chip as 模型 */
+            }
+        });
+    }
+
     /** Ask the host which models are routable, then let the user pick one. */
     void showModelPicker(final Dialog composer, final Button chip) {
         if (selectedId == null) return;
@@ -2360,7 +2434,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onErr(String message, int status) {
-                toast("列不出模型: " + message);
+                toast(status == 404 ? "服务器插件太旧，升到 0.3.0 才有模型列表" : "列不出模型: " + message);
             }
         });
     }
