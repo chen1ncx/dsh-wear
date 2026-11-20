@@ -433,6 +433,9 @@ public class MainActivity extends Activity {
                 if (mySeq != seqCounter) return;
                 lastError = message;
                 if (status == 401) {
+                    // A pairing attempt is in flight: do not tear the page down
+                    // and clear the code the user is typing.
+                    if (pairing) return;
                     // Keep the token: a 401 usually means this host revoked the
                     // device, and wiping it would force a new pairing just to
                     // switch back later.
@@ -1391,13 +1394,32 @@ public class MainActivity extends Activity {
         GradientDrawable card = bg(C_CARD_HI, 20);
         content.setBackground(card);
 
+        LinearLayout head = row();
         TextView title = text(name.isEmpty() ? "图片" : name, 9, C_MUTED, false);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        content.addView(title, fullWidth());
+        head.addView(title, weight(1));
+        Button close = roundKey("✕", C_CARD);
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        head.addView(close, lp(dp(24), dp(24), 4, 0, 0, 0));
+        content.addView(head, fullWidth());
 
         final ImageView view = new ImageView(this);
         view.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        // Tapping the picture also closes the preview: on a watch the outside
+        // strip is only a few pixels wide.
+        view.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
         content.addView(view, lp(-1, -2, 0, 4, 0, 0));
 
         dialog.setContentView(content);
