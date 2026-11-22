@@ -187,6 +187,7 @@ final class SoloConfig {
             SharedPreferences prefs = context.getSharedPreferences("dshwatch", Context.MODE_PRIVATE);
             String base = "";
             String key = prefs.getString("soloKey", "");
+            if (key.contains("****")) key = "";
             String model = "";
             boolean fetch = false;
             for (String pair : body.split("&")) {
@@ -199,9 +200,19 @@ final class SoloConfig {
                 else if ("model".equals(name)) model = val;
                 else if ("fetch".equals(name)) fetch = true;
             }
-            if (fetch && !base.isEmpty() && !key.isEmpty()) {
+            if (base.isEmpty()) {
+                respond(client, 200, page("没保存", "<p class=bad>Base URL 还是空的。</p>"
+                        + "<p class=hint>上面选一个供应商就会自动填。</p>"));
+                return;
+            }
+            if (key.isEmpty()) {
+                respond(client, 200, page("没保存", "<p class=bad>还没有 API Key。</p>"
+                        + "<p class=hint>把 API Key 整段填进那个框（sk-…）。</p>"));
+                return;
+            }
+            if (fetch) {
                 String[] result = fetchModels(base, key);
-                if (result.length > 0 && result[0] != null) {
+                if (result[0] != null) {
                     respond(client, 200, formPage(base, maskKey(key), model, result, null, ""));
                 } else {
                     respond(client, 200, formPage(base, maskKey(key), model, null,
@@ -209,33 +220,24 @@ final class SoloConfig {
                 }
                 return;
             }
-            if (!base.isEmpty() && !key.isEmpty() && model.isEmpty()) {
+            if (model.isEmpty()) {
                 respond(client, 200, formPage(base, maskKey(key), "",
-                        null, "模型要从云端获取后再选，不能留空。", ""));
+                        null, "先点「从云端获取模型」，再选一个。", ""));
                 return;
             }
-            if (fetch && !base.isEmpty() && !key.isEmpty()) {
-                prefs.edit()
-                        .putString("soloBase", base)
-                        .putString("soloKey", key)
-                        .putString("soloModel", model)
-                        .putString("mode", "solo")
-                        .apply();
-                Listener target = listener;
-                if (target != null) target.onSaved(base, key, model);
-                String[] check = fetchModels(base, key);
-                String verdict = check[0] != null
-                        ? "<p class=ok>Key 可用，看到 " + check.length + " 个模型，可以关掉这个页面了。</p>"
-                        : "<p class=bad>已存进手表，但这把 Key 试调失败：" + escape(check[1]) + "</p>";
-                respond(client, 200, page("已保存", verdict));
-                return;
-            }
-            String missing = base.isEmpty() && key.isEmpty() ? "Base URL 和 API Key"
-                    : base.isEmpty() ? "Base URL" : "API Key";
-            respond(client, 200, page("没保存",
-                    "<p class=bad>还差 " + missing + "。</p>"
-                            + "<p class=hint>Base URL 可以先在上面选供应商，会自动填进来；"
-                            + "API Key 要整段填（sk-…）。</p>"));
+            prefs.edit()
+                    .putString("soloBase", base)
+                    .putString("soloKey", key)
+                    .putString("soloModel", model)
+                    .putString("mode", "solo")
+                    .commit();
+            Listener target = listener;
+            if (target != null) target.onSaved(base, key, model);
+            String[] check = fetchModels(base, key);
+            String verdict = check[0] != null
+                    ? "<p class=ok>Key 可用，看到 " + check.length + " 个模型，可以关掉这个页面了。</p>"
+                    : "<p class=bad>已存进手表，但这把 Key 试调失败：" + escape(check[1]) + "</p>";
+            respond(client, 200, page("已保存", verdict));
             return;
         }
 
@@ -244,6 +246,10 @@ final class SoloConfig {
         String model = prefs.getString("soloModel", "");
         boolean hasKey = prefs.getString("soloKey", "").length() > 0;
         String masked = prefs.getString("soloKey", "");
+        if (masked.contains("****")) {
+            prefs.edit().remove("soloKey").commit();
+            masked = "";
+        }
         respond(client, 200, formPage(base, masked.isEmpty() ? "" : maskKey(masked),
                 model, null, null, ""));
     }

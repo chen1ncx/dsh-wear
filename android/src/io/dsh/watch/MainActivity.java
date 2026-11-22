@@ -3626,6 +3626,7 @@ public class MainActivity extends Activity {
         mode = prefs.getString("mode", "host");
         soloBase = prefs.getString("soloBase", "");
         soloKey = prefs.getString("soloKey", "");
+        if (soloKey != null && soloKey.contains("****")) soloKey = "";
         soloModel = prefs.getString("soloModel", "");
         soloMessages = null;
         try {
@@ -3648,6 +3649,11 @@ public class MainActivity extends Activity {
         soloBase = prefs.getString("soloBase", soloBase);
         soloKey = prefs.getString("soloKey", soloKey);
         soloModel = prefs.getString("soloModel", soloModel);
+        // A masked placeholder must never be treated as a real key.
+        if (soloKey != null && soloKey.contains("****")) {
+            soloKey = "";
+            prefs.edit().remove("soloKey").apply();
+        }
     }
 
     void saveSoloConfig() {
