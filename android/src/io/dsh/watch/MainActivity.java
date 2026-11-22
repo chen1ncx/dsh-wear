@@ -105,6 +105,8 @@ public class MainActivity extends Activity {
     int C_ERR_BG;
     int C_BLUE;
     int C_LINE;
+    /** Frame colour of the conversation cards, a step lighter than the fill. */
+    int C_EDGE;
 
     /** bg, card, cardHi, accent, onAccent, tertiary, error, errorBg */
     static final int[][] THEMES = {
@@ -117,6 +119,14 @@ public class MainActivity extends Activity {
             {0xFF171210, 0xFF231B17, 0xFF2D231E, 0xFFF4B08A, 0xFF4A2200, 0xFFF0D2BE, 0xFFF2B8B5, 0xFF8C1D18},
             {0xFF121316, 0xFF1C1D22, 0xFF26272D, 0xFFC7CBE0, 0xFF1F2333, 0xFFDDE1F5, 0xFFF2B8B5, 0xFF8C1D18},
     };
+
+    /** Lighten `from` toward `toward` by `amount`, keeping it opaque. */
+    static int blend(int from, int toward, float amount) {
+        int r = (int) (((from >> 16) & 0xFF) + (((toward >> 16) & 0xFF) - ((from >> 16) & 0xFF)) * amount);
+        int g = (int) (((from >> 8) & 0xFF) + (((toward >> 8) & 0xFF) - ((from >> 8) & 0xFF)) * amount);
+        int b = (int) ((from & 0xFF) + ((toward & 0xFF) - (from & 0xFF)) * amount);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
 
     void applyTheme(int index) {
         Log.i(TAG, "applyTheme " + index);
@@ -133,6 +143,8 @@ public class MainActivity extends Activity {
         C_TEXT = 0xFFE6E0E9;
         C_MUTED = 0xFFCAC4D0;
         C_LINE = 0xFF49454F;
+        C_EDGE = (C_CARD_HI & 0x00FFFFFF) | 0xFF000000;
+        C_EDGE = blend(C_CARD, 0xFFFFFFFF, 0.16f);
         Log.i(TAG, "  bg=" + Integer.toHexString(C_BG) + " accent=" + Integer.toHexString(C_ACCENT));
     }
 
@@ -900,6 +912,9 @@ public class MainActivity extends Activity {
             // While reading a conversation the pager stays put: leaving is the
             // back arrow's job, and a stray sideways drag must not page away.
             if (readingDetail) return false;
+            // A finger that landed on a conversation row belongs to that row:
+            // sideways there means "reveal 归档 / 删除", not "turn the page".
+            if (armedRow != null) return false;
             if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 downX = ev.getX();
                 downY = ev.getY();
@@ -1133,6 +1148,9 @@ public class MainActivity extends Activity {
     boolean showArchived;
     TextView listEmpty;
     TextView statusDot;
+    SwipeRow openSwipe;
+    /** Row that received the current finger-down; the pager stands back for it. */
+    SwipeRow armedRow;
     String pendingDelete;
     boolean needsAuth;
 
@@ -1229,6 +1247,10 @@ public class MainActivity extends Activity {
             listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
                 @Override
                 public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                    if (openSwipe != null) {
+                        openSwipe.close();
+                        return;
+                    }
                     if (position < rows.size()) {
                         if (ARCHIVE_TOGGLE.equals(rows.get(position).id)) {
                             showArchived = !showArchived;
@@ -3554,6 +3576,157 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** A row that slides left to reveal 归档 and 删除, like the phone's list. */
+    class SwipeRow extends FrameLayout {
+        final Session session;
+        final View content;
+        final LinearLayout actions;
+        final int actionWidth;
+        float downX;
+        float downY;
+        float startX;
+        boolean dragging;
+        boolean opened;
+        boolean claimed;
+
+        SwipeRow(Session session, View content) {
+            super(MainActivity.this);
+            this.session = session;
+            this.content = content;
+            actionWidth = dp(56) * 2;
+
+            actions = row();
+            actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            TextView archive = actionButton(session.archived ? "取消归档" : "归档", C_CARD_HI, C_TEXT);
+            archive.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    close();
+                    toggleArchive(session);
+                }
+            });
+            actions.addView(archive, new LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.MATCH_PARENT));
+            TextView delete = actionButton("删除", C_ERR_BG, 0xFF131313);
+            delete.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    close();
+                    confirmDelete(session);
+                }
+            });
+            actions.addView(delete, new LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.MATCH_PARENT));
+
+            FrameLayout.LayoutParams actionParams = new FrameLayout.LayoutParams(
+                    actionWidth, ViewGroup.LayoutParams.MATCH_PARENT);
+            actionParams.gravity = Gravity.RIGHT;
+            addView(actions, actionParams);
+            addView(content, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            actions.setVisibility(View.INVISIBLE);
+        }
+
+        /**
+         * Claim a sideways gesture early, before the pager above us decides it is
+         * a page swipe. Claiming on the first few pixels keeps vertical drags
+         * (scrolling) untouched, because those never become horizontal.
+         */
+        @Override
+        public boolean dispatchTouchEvent(MotionEvent ev) {
+            if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                downX = ev.getX();
+                downY = ev.getY();
+                startX = content.getTranslationX();
+                dragging = false;
+                claimed = false;
+                armedRow = this;
+            } else if (ev.getActionMasked() == MotionEvent.ACTION_UP || ev.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                if (armedRow == this) armedRow = null;
+            } else if (ev.getActionMasked() == MotionEvent.ACTION_MOVE && !claimed) {
+                float dx = Math.abs(ev.getX() - downX);
+                float dy = Math.abs(ev.getY() - downY);
+                if (dx > dp(2) && dx > dy * 1.2f) {
+                    claimed = true;
+                    requestDisallowInterceptTouchEvent(true);
+                }
+            }
+            return super.dispatchTouchEvent(ev);
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent ev) {
+            if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                return false;
+            }
+            if (ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                float dx = ev.getX() - downX;
+                float dy = ev.getY() - downY;
+                // Only a clearly sideways drag becomes a swipe; vertical stays a scroll.
+                if (Math.abs(dx) > dp(9) && Math.abs(dx) > Math.abs(dy) * 1.4f) {
+                    dragging = true;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent ev) {
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_MOVE: {
+                    actions.setVisibility(View.VISIBLE);
+                    float x = startX + (ev.getX() - downX);
+                    if (x > 0) x = 0;
+                    if (x < -actionWidth) x = -actionWidth;
+                    content.setTranslationX(x);
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL: {
+                    float x = content.getTranslationX();
+                    boolean open = x < -actionWidth * 0.45f;
+                    if (open) openRow(this); else closeOwn();
+                    return true;
+                }
+            }
+            return true;
+        }
+
+        void openRow(SwipeRow row) {
+            if (openSwipe != null && openSwipe != row) openSwipe.closeQuiet();
+            openSwipe = row;
+            row.opened = true;
+            row.actions.setVisibility(View.VISIBLE);
+            row.content.animate().translationX(-row.actionWidth).setDuration(120).start();
+        }
+
+        void closeOwn() {
+            opened = false;
+            if (openSwipe == this) openSwipe = null;
+            content.animate().translationX(0).setDuration(120).start();
+            actions.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (!opened) actions.setVisibility(View.INVISIBLE);
+                }
+            }, 140);
+        }
+
+        void closeQuiet() {
+            opened = false;
+            content.animate().translationX(0).setDuration(90).start();
+            actions.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (!opened) actions.setVisibility(View.INVISIBLE);
+                }
+            }, 110);
+        }
+
+        void close() {
+            closeOwn();
+        }
+    }
+
     class SessionAdapter extends BaseAdapter {
         @Override
         public int getCount() {
@@ -3575,7 +3748,8 @@ public class MainActivity extends Activity {
             LinearLayout row = new LinearLayout(MainActivity.this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(8), dp(5), dp(8), dp(5));
+            row.setPadding(dp(9), dp(10), dp(9), dp(10));
+            row.setMinimumHeight(dp(38));
             row.setBackground(rowState());
 
             Session s = rows.get(position);
@@ -3612,7 +3786,8 @@ public class MainActivity extends Activity {
                 badge.setPadding(dp(5), 0, dp(5), 0);
                 row.addView(badge, lp(-2, dp(16), 4, 0, 0, 0));
             }
-            return row;
+            // The card slides aside to expose 归档 / 删除.
+            return new SwipeRow(s, row);
         }
     }
 
@@ -3695,6 +3870,42 @@ public class MainActivity extends Activity {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(dp(24));
+        return drawable;
+    }
+
+    TextView actionButton(String label, int background, int foreground) {
+        TextView view = text(label, 10, foreground, true);
+        view.setGravity(Gravity.CENTER);
+        view.setBackground(bg(background, 18));
+        return view;
+    }
+
+    /** Archive (or bring back) one conversation. */
+    void toggleArchive(final Session session) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("session", session.id);
+        } catch (Exception ignored) {
+        }
+        String path = session.archived ? "/api/unarchive" : "/api/archive";
+        api("POST", path, body, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                toast(session.archived ? "已取消归档" : "已归档");
+                refreshNow(true);
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                toast(status == 501 ? "服务器插件要升级到 0.3.6" : "归档失败: " + message);
+            }
+        });
+    }
+
+    /** Conversation card: a visible frame, not just a fill. */
+    GradientDrawable card(int color, float radius) {
+        GradientDrawable drawable = bg(color, radius);
+        drawable.setStroke(dp(1.5f), C_EDGE);
         return drawable;
     }
 
