@@ -2,6 +2,7 @@ package io.dsh.watch;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -9,10 +10,15 @@ import java.io.OutputStream;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.HttpURLConnection;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URL;
 import java.net.URLDecoder;
 import java.util.Collections;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * Tiny LAN page so the phone can fill in the standalone config: the watch shows
@@ -25,6 +31,7 @@ final class SoloConfig {
         void onSaved(String base, String key, String model);
     }
 
+    private static final String TAG = "DSHWatch";
     private static final int PORT = 8788;
     private static ServerSocket socket;
     private static Thread thread;
@@ -39,9 +46,10 @@ final class SoloConfig {
 
     /** Start serving, and return the URL to encode in the QR code. */
     static String start(final Context context) {
-        if (socket == null) {
+        if (socket == null || socket.isClosed()) {
             try {
                 socket = new ServerSocket(PORT);
+                Log.i(TAG, "solo server bound on " + PORT);
                 thread = new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -51,6 +59,7 @@ final class SoloConfig {
                 thread.setDaemon(true);
                 thread.start();
             } catch (Throwable err) {
+                Log.w(TAG, "solo server bind failed", err);
                 socket = null;
                 return null;
             }
@@ -91,10 +100,28 @@ final class SoloConfig {
             Socket client = null;
             try {
                 client = socket.accept();
+                Log.i(TAG, "solo server accepted");
+                final Socket opened = client;
                 client.setSoTimeout(8000);
-                handle(context, client);
-            } catch (Throwable ignored) {
-            } finally {
+                Thread worker = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            handle(context, opened);
+                            Log.i(TAG, "solo server handled");
+                        } catch (Throwable boom) {
+                            Log.w(TAG, "solo handle failed", boom);
+                        } finally {
+                            try {
+                                opened.close();
+                            } catch (Exception no) {
+                            }
+                        }
+                    }
+                });
+                worker.setDaemon(true);
+                worker.start();
+            } catch (Throwable no) {
                 try {
                     if (client != null) client.close();
                 } catch (Exception ignored) {
@@ -104,18 +131,32 @@ final class SoloConfig {
     }
 
     private static void handle(Context context, Socket client) throws Exception {
+        Log.i(TAG, "solo handle start");
         InputStream in = client.getInputStream();
         ByteArrayOutputStream head = new ByteArrayOutputStream();
-        int previous = -1;
-        int value;
-        while ((value = in.read()) >= 0) {
-            head.write(value);
-            if (previous == '\n' && value == '\n') break;
-            if (previous == '\r' && value == '\r') break;
-            previous = value;
-            if (head.size() > 16384) break;
+        byte[] chunk = new byte[2048];
+        // Read until the blank line that ends the headers. Checking CRLF and
+        // bare LF matters: byte-by-byte matching missed "\r\n\r\n" and made
+        // every page load wait for the socket timeout.
+        while (head.size() < 16384) {
+            int n = in.read(chunk);
+            if (n <= 0) break;
+            head.write(chunk, 0, n);
+            String sofar = new String(head.toByteArray(), "ISO-8859-1");
+            if (sofar.contains("\r\n\r\n") || sofar.endsWith("\n\n")) break;
         }
-        String request = new String(head.toByteArray(), "UTF-8");
+        byte[] raw = head.toByteArray();
+        String all = new String(raw, "ISO-8859-1");
+        int split = all.indexOf("\r\n\r\n");
+        int splitLen = 4;
+        if (split < 0) {
+            split = all.indexOf("\n\n");
+            splitLen = 2;
+        }
+        String request = split >= 0 ? all.substring(0, split) : all;
+        byte[] leftover = split >= 0
+                ? java.util.Arrays.copyOfRange(raw, split + splitLen, raw.length)
+                : new byte[0];
         String[] lines = request.split("\r?\n");
         String[] first = lines.length > 0 ? lines[0].split(" ") : new String[0];
         String method = first.length > 0 ? first[0] : "GET";
@@ -131,23 +172,23 @@ final class SoloConfig {
                 }
             }
         }
-        String body = "";
-        if (length > 0) {
-            byte[] raw = new byte[Math.min(length, 8192)];
-            int read = 0;
-            while (read < raw.length) {
-                int n = in.read(raw, read, raw.length - read);
-                if (n <= 0) break;
-                read += n;
-            }
-            body = new String(raw, 0, read, "UTF-8");
+        byte[] bodyBytes = new byte[Math.max(0, Math.min(length, 8192))];
+        int filled = Math.min(leftover.length, bodyBytes.length);
+        System.arraycopy(leftover, 0, bodyBytes, 0, filled);
+        while (filled < bodyBytes.length) {
+            int n = in.read(bodyBytes, filled, bodyBytes.length - filled);
+            if (n <= 0) break;
+            filled += n;
         }
+        String body = new String(bodyBytes, 0, filled, "UTF-8");
 
+        Log.i(TAG, "solo " + method + " " + path + " len=" + length);
         if ("POST".equals(method) && path.startsWith("/save")) {
             SharedPreferences prefs = context.getSharedPreferences("dshwatch", Context.MODE_PRIVATE);
             String base = "";
             String key = "";
             String model = "";
+            boolean fetch = false;
             for (String pair : body.split("&")) {
                 int eq = pair.indexOf('=');
                 if (eq <= 0) continue;
@@ -156,6 +197,22 @@ final class SoloConfig {
                 if ("base".equals(name)) base = val;
                 else if ("key".equals(name)) key = val;
                 else if ("model".equals(name)) model = val;
+                else if ("fetch".equals(name)) fetch = true;
+            }
+            if (fetch && !base.isEmpty() && !key.isEmpty()) {
+                String[] result = fetchModels(base, key);
+                if (result.length > 0 && result[0] != null) {
+                    respond(client, 200, formPage(base, key, model, result, null));
+                } else {
+                    respond(client, 200, formPage(base, key, model, null,
+                            result.length > 1 ? result[1] : "获取失败"));
+                }
+                return;
+            }
+            if (!base.isEmpty() && !key.isEmpty() && model.isEmpty()) {
+                respond(client, 200, formPage(base, key, "",
+                        null, "模型要从云端获取后再选，不能留空。"));
+                return;
             }
             if (!base.isEmpty() && !key.isEmpty()) {
                 prefs.edit()
@@ -177,16 +234,76 @@ final class SoloConfig {
         String base = prefs.getString("soloBase", "https://api.deepseek.com");
         String model = prefs.getString("soloModel", "");
         boolean hasKey = prefs.getString("soloKey", "").length() > 0;
-        String form = "<form method=post action=/save>"
-                + "<label>Base URL</label>"
-                + "<input name=base value=\"" + escape(base) + "\" placeholder=\"https://api.deepseek.com\">"
-                + "<label>API Key</label>"
-                + "<input name=key value=\"\" placeholder=\"" + (hasKey ? "已保存，重新填会覆盖" : "sk-…") + "\">"
-                + "<label>模型</label>"
-                + "<input name=model value=\"" + escape(model) + "\" placeholder=\"模型名，例如 deepseek-chat\">"
-                + "<button>保存到手表</button></form>"
-                + "<p class=hint>填完点保存，手表会自动填入并开始用。</p>";
-        respond(client, 200, page("配置 DSH on wear", form));
+        respond(client, 200, formPage(base, hasKey ? "" : "", model, null, null));
+    }
+
+    /** The whole config page: base, key, then either a text field or a model list. */
+    private static String formPage(String base, String key, String model,
+                                   String[] models, String error) {
+        StringBuilder form = new StringBuilder();
+        form.append("<form method=post action=/save>");
+        form.append("<label>Base URL</label>")
+                .append("<input name=base value=\"").append(escape(base)).append("\" placeholder=\"https://api.deepseek.com\">");
+        form.append("<label>API Key</label>")
+                .append("<input name=key value=\"").append(escape(key)).append("\" placeholder=\"sk-…\">");
+        if (models != null && models.length > 0) {
+            form.append("<label>模型（已从云端取到 ").append(models.length).append(" 个）</label>");
+            form.append("<select name=model>");
+            for (String id : models) {
+                if (id == null) continue;
+                form.append("<option value=\"").append(escape(id)).append("\"")
+                        .append(id.equals(model) ? " selected" : "").append(">")
+                        .append(escape(id)).append("</option>");
+            }
+            form.append("</select>");
+        } else {
+            form.append("<label>模型</label>")
+                    .append("<div class=pick>还没选。先点下面的「从云端获取模型」，")
+                    .append("列表来自这把 Key 能用的模型。</div>");
+            form.append("<input type=hidden name=model value=\"\">");
+        }
+        form.append("<button name=fetch value=1 class=ghost>从云端获取模型</button>");
+        form.append("<button>保存到手表</button>");
+        form.append("</form>");
+        if (error != null) {
+            form.append("<p class=bad>").append(escape(error)).append("</p>");
+        }
+        form.append("<p class=hint>填完点保存，手表会自动填入并开始用。</p>");
+        return page("配置 DSH on wear", form.toString());
+    }
+
+    /** Ask the API which models this key can use. [list-of-ids..., error] shape: see caller. */
+    private static String[] fetchModels(String base, String key) {
+        HttpURLConnection conn = null;
+        try {
+            String url = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+            conn = (HttpURLConnection) new URL(url + "/models").openConnection();
+            conn.setConnectTimeout(6000);
+            conn.setReadTimeout(8000);
+            conn.setRequestProperty("Authorization", "Bearer " + key);
+            int code = conn.getResponseCode();
+            InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] chunk = new byte[2048];
+            int n;
+            while ((n = stream.read(chunk)) > 0) buffer.write(chunk, 0, n);
+            String raw = new String(buffer.toByteArray(), "UTF-8");
+            if (code >= 400) return new String[]{null, "HTTP " + code + " " + raw};
+            JSONArray data = new JSONObject(raw).optJSONArray("data");
+            if (data == null) return new String[]{null, "返回里没有 data"};
+            java.util.List<String> ids = new java.util.ArrayList<>();
+            for (int i = 0; i < data.length(); i += 1) {
+                JSONObject item = data.optJSONObject(i);
+                String id = item == null ? null : item.optString("id", "");
+                if (id != null && !id.isEmpty()) ids.add(id);
+            }
+            if (ids.isEmpty()) return new String[]{null, "这个 Key 没有可用模型"};
+            return ids.toArray(new String[0]);
+        } catch (Throwable err) {
+            return new String[]{null, String.valueOf(err.getMessage())};
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
     }
 
     private static String escape(String value) {
@@ -204,12 +321,15 @@ final class SoloConfig {
                 + "label{display:block;margin:14px 0 6px;color:#8b98ab;font-size:13px}"
                 + "input{width:100%;box-sizing:border-box;padding:11px;border-radius:10px;border:1px solid #2a3444;background:#161c25;color:#e8edf5;font-size:15px}"
                 + "button{margin-top:18px;width:100%;padding:13px;border:0;border-radius:11px;background:#7ac4ff;color:#0b1220;font-size:16px;font-weight:600}"
+                + "button.ghost{background:#243044;color:#cfe0f5;margin-top:10px}"
+                + ".pick{padding:11px;border-radius:10px;background:#161c25;border:1px dashed #2a3444;color:#8b98ab;font-size:14px}"
                 + ".ok{color:#7fe0a8}.bad{color:#ff8f8f}.hint{color:#7b8798;font-size:13px}"
                 + "</style><h3>" + title + "</h3>" + body;
     }
 
     private static void respond(Socket client, int code, String html) throws Exception {
         byte[] bytes = html.getBytes("UTF-8");
+        Log.i(TAG, "solo respond " + code + " bytes=" + bytes.length);
         String head = "HTTP/1.1 " + code + " " + (code == 200 ? "OK" : "ERR") + "\r\n"
                 + "Content-Type: text/html; charset=utf-8\r\n"
                 + "Content-Length: " + bytes.length + "\r\n"

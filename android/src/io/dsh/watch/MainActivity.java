@@ -372,6 +372,11 @@ public class MainActivity extends Activity {
     final Runnable ticker = new Runnable() {
         @Override
         public void run() {
+            if ("solo".equals(mode)) {
+                // Standalone mode never talks to a DSH host.
+                scheduleTick(POLL_MS);
+                return;
+            }
             if (token == null) return;
             refreshNow();
             scheduleTick(POLL_MS);
@@ -464,8 +469,11 @@ public class MainActivity extends Activity {
                     }
                     return;
                 }
+                // Only the list / detail redraw themselves. A secondary page
+                // (更多, 配对, 独立使用…) must survive a failed poll.
                 if (token != null) {
-                    if (selectedId == null) showList(); else showDetail();
+                    if (showing(screenList)) showList();
+                    else if (showing(screenDetail)) showDetail();
                 }
             }
         });
@@ -1309,6 +1317,7 @@ public class MainActivity extends Activity {
     boolean needsAuth;
 
     void showList() {
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if ("solo".equals(mode)) {
             showSoloChat();
             return;
@@ -3627,6 +3636,7 @@ public class MainActivity extends Activity {
     }
 
     void showModePage() {
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         LinearLayout page = secondary("切换模式");
         addModeRow(page, "host", "连接 DSH", "看电脑上 DSH 在做什么，并回话");
         addModeRow(page, "solo", "独立使用", "不连 DSH，手表直接调模型");
@@ -3643,6 +3653,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 mode = value;
+                selectedId = null;
                 saveSoloConfig();
                 history.clear();
                 if ("solo".equals(mode)) showSoloChat(); else showList();
@@ -3739,7 +3750,9 @@ public class MainActivity extends Activity {
         });
         body.addView(save, lp(-1, dp(34), 0, dp(8), 0, 0));
 
-        TextView tip = text("懒得按键？扫这个二维码，在手机上填，手表自动填入。", 8, C_MUTED, false);
+        // The QR only works while this process is alive and awake.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        TextView tip = text("手机扫码填（手表保持亮屏，关屏就断了）", 8, C_MUTED, false);
         tip.setPadding(dp(8), dp(12), dp(8), dp(4));
         body.addView(tip, fullWidth());
         body.addView(soloQrView(), lp(-1, dp(150), 0, 0, 0, 0));
@@ -3869,6 +3882,7 @@ public class MainActivity extends Activity {
 
     /** QR into the LAN page the phone opens to fill Base URL / key / model. */
     View soloQrView() {
+        String startedUrl = SoloConfig.start(this);
         SoloConfig.setListener(new SoloConfig.Listener() {
             @Override
             public void onSaved(String base, String key, String model) {
@@ -3886,7 +3900,7 @@ public class MainActivity extends Activity {
                 });
             }
         });
-        String url = SoloConfig.start(this);
+        String url = startedUrl;
         final String text = url == null ? "http://" + (SoloConfig.localIp() == null ? "?" : SoloConfig.localIp()) + ":8788/" : url;
         final boolean[][] grid = Qr.encode(text, Qr.M);
         View view = new View(this) {
@@ -3921,7 +3935,7 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.addView(view, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        TextView caption = text(text, 7, C_MUTED, false);
+        TextView caption = text(text, 7, C_MUTED, true);
         caption.setGravity(Gravity.CENTER);
         caption.setPadding(0, dp(2), 0, 0);
         box.addView(caption, fullWidth());
@@ -3929,6 +3943,7 @@ public class MainActivity extends Activity {
     }
 
     void showSoloChat() {
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setBackgroundColor(C_BG);
