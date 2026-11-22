@@ -912,9 +912,6 @@ public class MainActivity extends Activity {
             // While reading a conversation the pager stays put: leaving is the
             // back arrow's job, and a stray sideways drag must not page away.
             if (readingDetail) return false;
-            // A finger that landed on a conversation row belongs to that row:
-            // sideways there means "reveal 归档 / 删除", not "turn the page".
-            if (armedRow != null) return false;
             // The guide is a one-way door: read to the end, then tap 确认.
             if (guideActive) return false;
             if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -1265,8 +1262,8 @@ public class MainActivity extends Activity {
     SwipeRow openSwipe;
     /** First-run guide owns the screen: no paging, no pill, only 确认 moves on. */
     boolean guideActive;
-    /** Row that received the current finger-down; the pager stands back for it. */
-    SwipeRow armedRow;
+    /** Signature of what the list currently shows; a poll rebuilds only on change. */
+    int listSig;
     String pendingDelete;
     boolean needsAuth;
 
@@ -1364,6 +1361,9 @@ public class MainActivity extends Activity {
                 @Override
                 public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                     if (openSwipe != null) {
+                        // The finger that just opened the row also lifts here; do
+                        // not treat that release as "tap outside to close".
+                        if (System.currentTimeMillis() - openSwipe.openedAt < 400) return;
                         openSwipe.close();
                         return;
                     }
@@ -1384,16 +1384,6 @@ public class MainActivity extends Activity {
                     }
                 }
             });
-            listView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
-                @Override
-                public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-                    if (position >= rows.size()) return false;
-                    Session s = rows.get(position);
-                    if (ARCHIVE_TOGGLE.equals(s.id)) return false;
-                    confirmDelete(s);
-                    return true;
-                }
-            });
             screenList.addView(listView, weightV());
             listEmpty = text("", 11, C_MUTED, false);
             listEmpty.setGravity(Gravity.CENTER);
@@ -1403,7 +1393,13 @@ public class MainActivity extends Activity {
         }
         readingDetail = false;
         showScreen(screenList);
-        bindSessions();
+        int sig = (sessions == null ? 0 : sessions.toString().hashCode()) * 31
+                + finishedUnseen.hashCode() + (showArchived ? 7 : 0);
+        // Rebuilding identical rows every 4 seconds also closed an open row.
+        if (sig != listSig || adapter == null) {
+            listSig = sig;
+            bindSessions();
+        }
     }
 
     void bindSessions() {
@@ -3698,18 +3694,20 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** A row that slides left to reveal 归档 and 删除, like the phone's list. */
+    /**
+     * A row that slides aside when it is held, to expose 归档 and 删除.
+     * A plain sideways drag is left alone: that gesture turns the page.
+     */
     class SwipeRow extends FrameLayout {
         final Session session;
         final View content;
         final LinearLayout actions;
         final int actionWidth;
+        final Runnable hold;
         float downX;
         float downY;
-        float startX;
-        boolean dragging;
         boolean opened;
-        boolean claimed;
+        long openedAt;
 
         SwipeRow(Session session, View content) {
             super(MainActivity.this);
@@ -3745,107 +3743,69 @@ public class MainActivity extends Activity {
             addView(content, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             actions.setVisibility(View.INVISIBLE);
+
+            // 200ms of stillness opens the actions; anything that moves is a
+            // scroll or a page swipe and cancels the timer.
+            hold = new Runnable() {
+                @Override
+                public void run() {
+                    openRow(SwipeRow.this);
+                }
+            };
         }
 
-        /**
-         * Claim a sideways gesture early, before the pager above us decides it is
-         * a page swipe. Claiming on the first few pixels keeps vertical drags
-         * (scrolling) untouched, because those never become horizontal.
-         */
         @Override
         public boolean dispatchTouchEvent(MotionEvent ev) {
-            if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                downX = ev.getX();
-                downY = ev.getY();
-                startX = content.getTranslationX();
-                dragging = false;
-                claimed = false;
-                armedRow = this;
-            } else if (ev.getActionMasked() == MotionEvent.ACTION_UP || ev.getActionMasked() == MotionEvent.ACTION_CANCEL) {
-                if (armedRow == this) armedRow = null;
-            } else if (ev.getActionMasked() == MotionEvent.ACTION_MOVE && !claimed) {
-                float dx = Math.abs(ev.getX() - downX);
-                float dy = Math.abs(ev.getY() - downY);
-                if (dx > dp(2) && dx > dy * 1.2f) {
-                    claimed = true;
-                    requestDisallowInterceptTouchEvent(true);
-                }
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = ev.getX();
+                    downY = ev.getY();
+                    removeCallbacks(hold);
+                    postDelayed(hold, 200);
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(ev.getX() - downX) > dp(8) || Math.abs(ev.getY() - downY) > dp(8)) {
+                        removeCallbacks(hold);
+                    }
+                    break;
+                default:
+                    removeCallbacks(hold);
+                    break;
             }
             return super.dispatchTouchEvent(ev);
-        }
-
-        @Override
-        public boolean onInterceptTouchEvent(MotionEvent ev) {
-            if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                return false;
-            }
-            if (ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                float dx = ev.getX() - downX;
-                float dy = ev.getY() - downY;
-                // Only a clearly sideways drag becomes a swipe; vertical stays a scroll.
-                if (Math.abs(dx) > dp(9) && Math.abs(dx) > Math.abs(dy) * 1.4f) {
-                    dragging = true;
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent ev) {
-            switch (ev.getActionMasked()) {
-                case MotionEvent.ACTION_MOVE: {
-                    actions.setVisibility(View.VISIBLE);
-                    float x = startX + (ev.getX() - downX);
-                    if (x > 0) x = 0;
-                    if (x < -actionWidth) x = -actionWidth;
-                    content.setTranslationX(x);
-                    return true;
-                }
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL: {
-                    float x = content.getTranslationX();
-                    boolean open = x < -actionWidth * 0.45f;
-                    if (open) openRow(this); else closeOwn();
-                    return true;
-                }
-            }
-            return true;
         }
 
         void openRow(SwipeRow row) {
             if (openSwipe != null && openSwipe != row) openSwipe.closeQuiet();
             openSwipe = row;
             row.opened = true;
+            row.openedAt = System.currentTimeMillis();
             row.actions.setVisibility(View.VISIBLE);
-            row.content.animate().translationX(-row.actionWidth).setDuration(120).start();
-        }
-
-        void closeOwn() {
-            opened = false;
-            if (openSwipe == this) openSwipe = null;
-            content.animate().translationX(0).setDuration(120).start();
-            actions.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    if (!opened) actions.setVisibility(View.INVISIBLE);
-                }
-            }, 140);
+            row.content.animate().translationX(-row.actionWidth).setDuration(140).start();
+            row.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
         }
 
         void closeQuiet() {
             opened = false;
-            content.animate().translationX(0).setDuration(90).start();
+            content.animate().translationX(0).setDuration(110).start();
             actions.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     if (!opened) actions.setVisibility(View.INVISIBLE);
                 }
-            }, 110);
+            }, 130);
         }
 
         void close() {
-            closeOwn();
+            opened = false;
+            if (openSwipe == this) openSwipe = null;
+            content.animate().translationX(0).setDuration(140).start();
+            actions.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (!opened) actions.setVisibility(View.INVISIBLE);
+                }
+            }, 150);
         }
     }
 
