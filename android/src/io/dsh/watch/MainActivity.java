@@ -186,8 +186,6 @@ public class MainActivity extends Activity {
     long lastOkAt;
     boolean refreshing;
     int seqCounter;
-    boolean screenExitReady;
-    LinearLayout screenExit;
     boolean pairing;
     int pairSeq;
     boolean firstPaint = true;
@@ -199,20 +197,9 @@ public class MainActivity extends Activity {
     LinearLayout screenPair;
     LinearLayout screenList;
     LinearLayout screenDetail;
-    Pager pager;
-    LinearLayout pagesBox;
-    FrameLayout pageExit;
-    FrameLayout conversation;
-    FrameLayout pagePair;
-    FrameLayout pageTheme;
-    LinearLayout indicator;
-    int pageWidth;
-    int pageIndex = PAGE_TALK;
 
-    static final int PAGE_EXIT = 0;
-    static final int PAGE_TALK = 1;
-    static final int PAGE_PAIR = 2;
-    static final int PAGE_THEME = 3;
+    FrameLayout conversation;
+
 
     ListView listView;
     SessionAdapter adapter;
@@ -277,12 +264,6 @@ public class MainActivity extends Activity {
                 showPair(null);
             } else {
                 showList();
-                pager.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        pager.go(PAGE_TALK);
-                    }
-                });
             }
         } catch (Throwable err) {
             showFallback(err);
@@ -669,7 +650,6 @@ public class MainActivity extends Activity {
                 askServerName(baseUrl, token);
                 toast("配对成功");
                 showList();
-                if (pager != null) pager.go(PAGE_TALK);
                 scheduleTick(200);
             }
 
@@ -744,101 +724,15 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
-    FrameLayout pagerPage() {
-        FrameLayout frame = new FrameLayout(this);
-        frame.setBackgroundColor(C_BG);
-        frame.setPadding(0, 0, 0, dp(2));
-        frame.setLayoutParams(new LinearLayout.LayoutParams(pageWidth, ViewGroup.LayoutParams.MATCH_PARENT));
-        return frame;
-    }
-
     void buildPager() {
-        pageWidth = getResources().getDisplayMetrics().widthPixels;
-        pagesBox = new LinearLayout(this);
-        pagesBox.setOrientation(LinearLayout.HORIZONTAL);
-        pageExit = pagerPage();
-        conversation = pagerPage();
-        pagePair = pagerPage();
-        pageTheme = pagerPage();
-        pagesBox.addView(pageExit);
-        pagesBox.addView(conversation);
-        pagesBox.addView(pagePair);
-        pagesBox.addView(pageTheme);
-
-        pager = new Pager(this);
-        pager.addView(pagesBox, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        root.addView(pager, new FrameLayout.LayoutParams(
+        // One screen. 配对 / 主题 / 更多 / 关于 are pages swapped in by showScreen().
+        conversation = new FrameLayout(this);
+        conversation.setBackgroundColor(C_BG);
+        conversation.setPadding(0, 0, 0, dp(2));
+        root.addView(conversation, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        buildThemePage();
-        buildIndicator();
     }
 
-    /** The little pill at the bottom: one dot per page, the current one stretched. */
-    void buildIndicator() {
-        if (indicator != null) root.removeView(indicator);
-        indicator = new LinearLayout(this);
-        indicator.setOrientation(LinearLayout.HORIZONTAL);
-        indicator.setGravity(Gravity.CENTER);
-        indicator.setPadding(dp(5), dp(2), dp(5), dp(2));
-        indicator.setClickable(false);
-        indicator.setFocusable(false);
-
-        // Transparent glass: the capsule is only a hint, the page shows through.
-        GradientDrawable pill = new GradientDrawable();
-        pill.setColor(0x1AFFFFFF);
-        pill.setCornerRadius(dp(10));
-        pill.setStroke(dp(1), 0x2EFFFFFF);
-        indicator.setBackground(pill);
-
-        for (int i = 0; i < 4; i += 1) {
-            View dot = new View(this);
-            dot.setClickable(false);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(4), dp(4));
-            params.setMargins(dp(2), 0, dp(2), 0);
-            dot.setLayoutParams(params);
-            indicator.addView(dot);
-        }
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        params.bottomMargin = dp(4);
-        root.addView(indicator, params);
-        updateIndicator(pageIndex);
-    }
-
-    /** Visibility changes land later in the same frame; decide the pill after them. */
-    void refreshIndicatorSoon() {
-        ui.post(new Runnable() {
-            @Override
-            public void run() {
-                updateIndicator(pageIndex);
-            }
-        });
-    }
-
-    void updateIndicator(int page) {
-        if (indicator == null) return;
-        boolean reading = readingDetail || guideActive;
-        indicator.setVisibility(View.GONE);
-        if (detailActions != null) {
-            detailActions.setPadding(dp(6), dp(2), dp(6), reading ? dp(6) : dp(18));
-        }
-        for (int i = 0; i < indicator.getChildCount(); i += 1) {
-            View dot = indicator.getChildAt(i);
-            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) dot.getLayoutParams();
-            boolean active = i == page;
-            GradientDrawable shape = new GradientDrawable();
-            shape.setCornerRadius(dp(3));
-            shape.setColor(active ? C_ACCENT : 0x80FFFFFF);
-            dot.setBackground(shape);
-            params.width = dp(active ? 14 : 5);
-            params.height = dp(5);
-            dot.setLayoutParams(params);
-        }
-    }
-
-    /** Horizontal pager with page snapping; vertical scrolling stays with the children. */
     /** One-pixel rule used to split the tool capsule into three hit areas. */
     View hairline(int height) {
         View line = new View(this);
@@ -913,125 +807,6 @@ public class MainActivity extends Activity {
             canvas.drawCircle(cx, cy, body, paint);
             paint.setColor(C_BG);
             canvas.drawCircle(cx, cy, hole, paint);
-        }
-    }
-
-    class Pager extends HorizontalScrollView {
-        private float downX;
-        private float downY;
-        private VelocityTracker tracker;
-
-        Pager(Context context) {
-            super(context);
-            setHorizontalScrollBarEnabled(false);
-            setOverScrollMode(OVER_SCROLL_NEVER);
-            setClipToPadding(false);
-        }
-
-        /**
-         * A vertical list scroll must never turn into a page swipe. The stock
-         * HorizontalScrollView intercepts on any horizontal slop, so the axis is
-         * decided here first: mostly-vertical gestures stay with the child.
-         */
-        @Override
-        public boolean onInterceptTouchEvent(MotionEvent ev) {
-            // Paging is gone: the list is the app; other screens are pages
-            // reached from the header buttons, not by swiping.
-            if (true) return false;
-            if (readingDetail) return false;
-            // The guide is a one-way door: read to the end, then tap 确认.
-            if (guideActive) return false;
-            if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                downX = ev.getX();
-                downY = ev.getY();
-                super.onInterceptTouchEvent(ev);
-                return false;
-            }
-            if (ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                float dx = Math.abs(ev.getX() - downX);
-                float dy = Math.abs(ev.getY() - downY);
-                if (dx > dp(5) && dx > dy * 1.5f) {
-                    return super.onInterceptTouchEvent(ev);
-                }
-                return false;
-            }
-            return super.onInterceptTouchEvent(ev);
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent ev) {
-            return false;
-        }
-
-        boolean unusedTouchHandler(MotionEvent ev) {
-            if (tracker == null) tracker = VelocityTracker.obtain();
-            tracker.addMovement(ev);
-            boolean handled = super.onTouchEvent(ev);
-            int action = ev.getActionMasked();
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                tracker.computeCurrentVelocity(1000);
-                float vx = tracker.getXVelocity();
-                tracker.recycle();
-                tracker = null;
-                settle(vx);
-            }
-            return handled;
-        }
-
-        /**
-         * Decide the page from the gesture, not just from the resting position:
-         * a flick turns the page even when the content moved only a little, and a
-         * 30% drag is enough without velocity.
-         */
-        void settle(float vx) {
-            int width = getWidth();
-            if (width <= 0) return;
-            float pos = getScrollX() / (float) width;
-            int base = (int) Math.floor(pos);
-            int page = pos - base > 0.3f ? base + 1 : base;
-            if (vx < -dp(180)) page = (int) Math.ceil(pos);
-            else if (vx > dp(180)) page = (int) Math.floor(pos);
-            page = Math.max(0, Math.min(3, page));
-            smoothScrollTo(page * width, 0);
-            pageIndex = page;
-            updateIndicator(page);
-            onPageChanged(page);
-        }
-
-        @Override
-        protected void onScrollChanged(int left, int top, int oldLeft, int oldTop) {
-            super.onScrollChanged(left, top, oldLeft, oldTop);
-            int width = getWidth();
-            if (width > 0) updateIndicator(Math.max(0, Math.min(3, Math.round(left / (float) width))));
-        }
-
-        void snap() {
-            Log.i(TAG, "snap scrollX=" + getScrollX());
-            int width = getWidth();
-            if (width <= 0) return;
-            int page = Math.round(getScrollX() / (float) width);
-            page = Math.max(0, Math.min(3, page));
-            smoothScrollTo(page * width, 0);
-            pageIndex = page;
-            updateIndicator(page);
-            onPageChanged(page);
-        }
-
-        void go(int page) {
-            pageIndex = page;
-            updateIndicator(page);
-            onPageChanged(page);
-            int width = getWidth();
-            if (width <= 0) {
-                post(new Runnable() {
-                    @Override
-                    public void run() {
-                        smoothScrollTo(page * getWidth(), 0);
-                    }
-                });
-                return;
-            }
-            smoothScrollTo(page * width, 0);
         }
     }
 
@@ -1208,7 +983,6 @@ public class MainActivity extends Activity {
     /** First run: what to install on the host, with a copyable command block. */
     void buildGuidePage() {
         guideActive = true;
-        refreshIndicatorSoon();
         if (screenPair == null) {
             screenPair = page();
             pairScroll = new ScrollView(this);
@@ -1454,7 +1228,6 @@ public class MainActivity extends Activity {
     boolean needsAuth;
 
     void showList() {
-        refreshIndicatorSoon();
         if (token == null) {
             showPair(null);
             return;
@@ -1652,7 +1425,6 @@ public class MainActivity extends Activity {
     }
 
     void showDetail() {
-        refreshIndicatorSoon();
         if (selectedId == null) {
             showList();
             return;
@@ -3682,154 +3454,27 @@ public class MainActivity extends Activity {
         };
     }
 
-    // ============================================================== 退出
-
-    /** The screen the system back gesture lands on instead of killing the app. */
-    void showExit() {
-        buildExitPage();
-        if (pager != null) pager.go(PAGE_EXIT);
-    }
-
-    void buildExitPage() {
-        if (screenExit == null) {
-            screenExit = page();
-            LinearLayout box = new LinearLayout(this);
-            box.setOrientation(LinearLayout.VERTICAL);
-            box.setGravity(Gravity.CENTER_HORIZONTAL);
-            box.setPadding(dp(16), dp(22), dp(16), dp(10));
-
-            TextView title = text("DSH on wear", 16, C_ACCENT, true);
-            title.setGravity(Gravity.CENTER);
-            box.addView(title, fullWidth());
-            TextView tagline = text("在手表上查看您的电脑端的 DSH", 10, C_TEXT, false);
-            tagline.setGravity(Gravity.CENTER);
-            tagline.setPadding(0, dp(3), 0, 0);
-            box.addView(tagline, fullWidth());
-            TextView compat = text("兼容 DSH Go", 9, C_MUTED, false);
-            compat.setGravity(Gravity.CENTER);
-            compat.setPadding(0, dp(1), 0, 0);
-            box.addView(compat, fullWidth());
-            TextView sub = text("要退出吗？", 10, C_MUTED, false);
-            sub.setGravity(Gravity.CENTER);
-            sub.setPadding(0, dp(6), 0, 0);
-            box.addView(sub, fullWidth());
-
-            Button stay = smallButton("继续使用", C_BLUE);
-            stay.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    showList();
-                    if (pager != null) pager.go(PAGE_TALK);
-                }
-            });
-            box.addView(stay, lp(-1, dp(34), 0, 14, 0, 0));
-
-            Button quit = smallButton("退出应用", C_RED);
-            quit.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    quitApp();
-                }
-            });
-            box.addView(quit, lp(-1, dp(34), 0, 6, 0, 0));
-
-            screenExit.addView(box, weightV());
-        }
-        if (pageExit.getChildCount() == 0) {
-            pageExit.addView(screenExit, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        }
-    }
-
-    /** Side pages are built the first time they are reached. */
-    void onPageChanged(int page) {
-        Log.i(TAG, "page -> " + page);
-        // Unpaired: the conversation page has nothing to show, so the pair page
-        // is where the user belongs. A black page here reads as a broken app.
-        if (page == PAGE_TALK && token == null) {
-            if (!guideActive) showPair(null);
-            return;
-        }
-        if (page == PAGE_PAIR && pagePair.getChildCount() == 0) buildPairPage(null);
-        else if (page == PAGE_EXIT && pageExit.getChildCount() == 0) buildExitPage();
-    }
-
-    void buildThemePage() {
-        pageTheme.removeAllViews();
-        LinearLayout box = page();
-        box.setPadding(dp(16), dp(16), dp(16), dp(10));
-
-        box.addView(text("主题色", 18, C_TEXT, true), fullWidth());
-        TextView sub = text("点了立刻生效", 10, C_MUTED, false);
-        sub.setPadding(0, 0, 0, dp(6));
-        box.addView(sub, fullWidth());
-
-        int current = prefs.getInt("theme", 0);
-        for (int line = 0; line < 2; line += 1) {
-            LinearLayout row = row();
-            row.setGravity(Gravity.CENTER);
-            for (int col = 0; col < 4; col += 1) {
-                final int index = line * 4 + col;
-                View swatch = new View(this);
-                GradientDrawable shape = new GradientDrawable();
-                shape.setShape(GradientDrawable.OVAL);
-                shape.setColor(THEMES[index][3]);
-                if (index == current) shape.setStroke(dp(3), C_TEXT);
-                swatch.setBackground(shape);
-                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(30), dp(30));
-                params.setMargins(dp(4), dp(8), dp(4), dp(8));
-                swatch.setLayoutParams(params);
-                swatch.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        selectTheme(index);
-                    }
-                });
-                row.addView(swatch);
-            }
-            box.addView(row, fullWidth());
-        }
-        TextView hint = text("右滑退出 · 左滑配对 / 主题", 9, C_MUTED, false);
-        hint.setGravity(Gravity.CENTER);
-        hint.setPadding(0, dp(10), 0, 0);
-        box.addView(hint, fullWidth());
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(box, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        pageTheme.addView(scroll, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-    }
-
     void selectTheme(int index) {
         Log.i(TAG, "selectTheme " + index);
         prefs.edit().putInt("theme", index).apply();
         applyTheme(index);
         root.setBackgroundColor(C_BG);
-        pageExit.setBackgroundColor(C_BG);
-        conversation.setBackgroundColor(C_BG);
-        pagePair.setBackgroundColor(C_BG);
-        pageTheme.setBackgroundColor(C_BG);
+        if (conversation != null) conversation.setBackgroundColor(C_BG);
 
-        // Everything is rebuilt from the palette, so drop the cached views.
+        // Everything was drawn with the old palette: drop the cached views and
+        // redraw the list. No pager, no exit page - they no longer exist.
         screenList = null;
         screenDetail = null;
         screenPair = null;
-        screenExit = null;
         listStatus = null;
         detailTitle = null;
         policyChip = null;
         pairUrl = null;
         pairCode = null;
         pairStatus = null;
-        pageExit.removeAllViews();
-        pagePair.removeAllViews();
-        conversation.removeAllViews();
-        buildThemePage();
-        buildIndicator();
-        pager.go(PAGE_THEME);
-        if (token == null) buildPairPage(null); else showList();
+        history.clear();
+        if (conversation != null) conversation.removeAllViews();
+        if (token == null) showPair(null); else showList();
         toast("换好了");
     }
 
