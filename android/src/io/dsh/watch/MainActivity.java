@@ -991,11 +991,14 @@ public class MainActivity extends Activity {
             version = "?";
         }
         LinearLayout page = secondary("关于");
-        TextView dev = text("开发者：YukioZola@0o0社区 · 0o0.site", 9, C_TEXT, false);
+        TextView dev = text("开发者：", 9, C_MUTED, false);
         dev.setPadding(dp(8), dp(10), dp(8), 0);
         page.addView(dev, fullWidth());
+        TextView devName = text("YukioZola@0o0社区 · 0o0.site", 9, C_TEXT, false);
+        devName.setPadding(dp(8), dp(1), dp(8), 0);
+        page.addView(devName, fullWidth());
         TextView thanks = text("@DeepSeek Harness", 8, C_MUTED, false);
-        thanks.setPadding(dp(8), dp(2), dp(8), 0);
+        thanks.setPadding(dp(8), dp(3), dp(8), 0);
         page.addView(thanks, fullWidth());
         TextView name = text("DSH on wear", 13, C_ACCENT, true);
         name.setPadding(dp(8), dp(10), dp(8), 0);
