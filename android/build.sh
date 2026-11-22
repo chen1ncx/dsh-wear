@@ -33,7 +33,7 @@ echo "[2/6] resources"
   --java build/gen \
   --min-sdk-version 21 \
   --target-sdk-version 27 \
-  --version-code 94 \
+  --version-code 99 \
   --version-name 1.1.1
 
 echo "[3/6] javac"

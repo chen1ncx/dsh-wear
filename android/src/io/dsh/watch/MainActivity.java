@@ -1373,14 +1373,7 @@ public class MainActivity extends Activity {
                             bindSessions();
                             return;
                         }
-                        selectedId = rows.get(position).id;
-                        finishedUnseen.remove(selectedId);
-                        saveFinished();
-                        cancelDoneNote();
-                        lastPending = -1;
-                        state = null;
-                        showDetail();
-                        refreshNow(true);
+                        openConversation(rows.get(position));
                     }
                 }
             });
@@ -1393,13 +1386,31 @@ public class MainActivity extends Activity {
         }
         readingDetail = false;
         showScreen(screenList);
-        int sig = (sessions == null ? 0 : sessions.toString().hashCode()) * 31
-                + finishedUnseen.hashCode() + (showArchived ? 7 : 0);
-        // Rebuilding identical rows every 4 seconds also closed an open row.
+        // Only the fields we actually draw decide a rebuild: the payload carries
+        // timestamps that change on every poll and used to rebuild the list
+        // (and close an open row) every four seconds.
+        int sig = listSignature();
+        if (openSwipe != null) return;
         if (sig != listSig || adapter == null) {
             listSig = sig;
             bindSessions();
         }
+    }
+
+    /** Hash of the visible list state: stable while nothing on screen changed. */
+    int listSignature() {
+        int sig = 31 + (showArchived ? 7 : 0) + finishedUnseen.hashCode() + rows.size();
+        JSONArray list = sessions;
+        for (int i = 0; list != null && i < list.length(); i += 1) {
+            JSONObject item = list.optJSONObject(i);
+            if (item == null) continue;
+            sig = sig * 31 + item.optString("id", "").hashCode();
+            sig = sig * 31 + item.optString("title", "").hashCode();
+            sig = sig * 31 + (item.optBoolean("running", false) ? 1 : 0);
+            sig = sig * 31 + (item.optBoolean("archived", false) ? 1 : 0);
+            sig = sig * 31 + item.optInt("pending", 0);
+        }
+        return sig;
     }
 
     void bindSessions() {
@@ -3744,12 +3755,29 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             actions.setVisibility(View.INVISIBLE);
 
+            content.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (opened) {
+                        // The lift that opened the row also arrives as a click;
+                        // ignore that one, then a real tap closes it.
+                        if (System.currentTimeMillis() - openedAt < 500) return;
+                        close();
+                        return;
+                    }
+                    openConversation(session);
+                }
+            });
+
             // 200ms of stillness opens the actions; anything that moves is a
             // scroll or a page swipe and cancels the timer.
             hold = new Runnable() {
                 @Override
                 public void run() {
-                    openRow(SwipeRow.this);
+                    // Pressing an already-open row puts it back: that is how a
+                    // user expects to dismiss it.
+                    if (opened) close();
+                    else openRow(SwipeRow.this);
                 }
             };
         }
@@ -3761,7 +3789,7 @@ public class MainActivity extends Activity {
                     downX = ev.getX();
                     downY = ev.getY();
                     removeCallbacks(hold);
-                    postDelayed(hold, 200);
+                    postDelayed(hold, 400);
                     break;
                 case MotionEvent.ACTION_MOVE:
                     if (Math.abs(ev.getX() - downX) > dp(8) || Math.abs(ev.getY() - downY) > dp(8)) {
@@ -3953,6 +3981,22 @@ public class MainActivity extends Activity {
         drawable.setColor(color);
         drawable.setCornerRadius(dp(24));
         return drawable;
+    }
+
+    /** Enter one conversation; used by both the list row and its inner card. */
+    void openConversation(Session session) {
+        if (openSwipe != null) {
+            openSwipe.close();
+            return;
+        }
+        selectedId = session.id;
+        finishedUnseen.remove(selectedId);
+        saveFinished();
+        cancelDoneNote();
+        lastPending = -1;
+        state = null;
+        showDetail();
+        refreshNow(true);
     }
 
     TextView actionButton(String label, int background, int foreground) {
