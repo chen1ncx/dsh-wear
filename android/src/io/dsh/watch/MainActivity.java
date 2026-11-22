@@ -756,6 +756,28 @@ public class MainActivity extends Activity {
             setFocusable(true);
         }
 
+        /**
+         * Handle the tap here instead of leaning on View's click machinery: on
+         * this watch the stock path never fired performClick for a canvas view.
+         */
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    setPressed(true);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    setPressed(false);
+                    performClick();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    setPressed(false);
+                    return true;
+                default:
+                    return true;
+            }
+        }
+
         @Override
         public void setPressed(boolean value) {
             pressed = value;
@@ -864,7 +886,7 @@ public class MainActivity extends Activity {
     View pageRow(String label, String hint, final Runnable action) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(12), dp(10), dp(12), dp(10));
+        box.setPadding(dp(12), dp(6), dp(12), dp(7));
         box.setBackground(bg(C_CARD, 14));
         box.addView(text(label, 11, C_TEXT, false), fullWidth());
         if (hint != null && !hint.isEmpty()) {
@@ -881,25 +903,33 @@ public class MainActivity extends Activity {
         });
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setPadding(0, dp(2), 0, dp(4));
+        wrap.setPadding(0, dp(1), 0, dp(3));
         wrap.addView(box, fullWidth());
         return wrap;
     }
 
     void showColumnPage() {
         LinearLayout page = secondary("更多");
-        page.addView(pageRow("配对新设备", "换一台 DSH，或重新配一次", new Runnable() {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(6));
+        body.addView(pageRow("配对新设备", "换一台 DSH，或重新配一次", new Runnable() {
             public void run() { showPairPage(null); }
         }), fullWidth());
-        page.addView(pageRow("主题色", "八套配色，点了立刻生效", new Runnable() {
+        body.addView(pageRow("主题色", "八套配色，点了立刻生效", new Runnable() {
             public void run() { showThemePage(); }
         }), fullWidth());
-        page.addView(pageRow("退出应用", "手表上的 DSH 会关掉", new Runnable() {
+        body.addView(pageRow("退出应用", "手表上的 DSH 会关掉", new Runnable() {
             public void run() { confirmQuit(); }
         }), fullWidth());
-        page.addView(pageRow("关于", "版本与来源", new Runnable() {
+        body.addView(pageRow("关于", "开发者与版本", new Runnable() {
             public void run() { showAboutPage(); }
         }), fullWidth());
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(body, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        page.addView(scroll, weightV());
         readingDetail = false;
         go(page);
     }
@@ -961,6 +991,12 @@ public class MainActivity extends Activity {
             version = "?";
         }
         LinearLayout page = secondary("关于");
+        TextView dev = text("开发者：YukioZola@0o0社区 · 0o0.site", 9, C_TEXT, false);
+        dev.setPadding(dp(8), dp(10), dp(8), 0);
+        page.addView(dev, fullWidth());
+        TextView thanks = text("@DeepSeek Harness", 8, C_MUTED, false);
+        thanks.setPadding(dp(8), dp(2), dp(8), 0);
+        page.addView(thanks, fullWidth());
         TextView name = text("DSH on wear", 13, C_ACCENT, true);
         name.setPadding(dp(8), dp(10), dp(8), 0);
         page.addView(name, fullWidth());
