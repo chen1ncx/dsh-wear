@@ -3914,10 +3914,10 @@ public class MainActivity extends Activity {
                 new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        editTextDialog("API Key", "", "sk-…", new TextReady() {
+                        editTextDialog("API Key", soloKey == null || soloKey.isEmpty() ? "" : maskKey(soloKey), "sk-…", new TextReady() {
                             @Override
                             public void onText(String value) {
-                                if (value.isEmpty()) return;
+                                if (value.isEmpty() || value.contains("****")) return;
                                 soloKey = value;
                                 keyEdited = true;
                                 ((TextView) ((LinearLayout) ((LinearLayout) v.getParent())

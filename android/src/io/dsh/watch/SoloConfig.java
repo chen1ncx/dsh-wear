@@ -195,26 +195,23 @@ final class SoloConfig {
                 String name = pair.substring(0, eq);
                 String val = URLDecoder.decode(pair.substring(eq + 1), "UTF-8").trim();
                 if ("base".equals(name)) base = val;
-                else if ("key".equals(name) && !val.isEmpty()) key = val;
+                else if ("key".equals(name) && !val.isEmpty() && !val.contains("****")) key = val;
                 else if ("model".equals(name)) model = val;
                 else if ("fetch".equals(name)) fetch = true;
             }
             if (fetch && !base.isEmpty() && !key.isEmpty()) {
                 String[] result = fetchModels(base, key);
                 if (result.length > 0 && result[0] != null) {
-                    respond(client, 200, formPage(base, "", model, result, null,
-                            "已保存 " + maskKey(key)));
+                    respond(client, 200, formPage(base, maskKey(key), model, result, null, ""));
                 } else {
-                    respond(client, 200, formPage(base, "", model, null,
-                            result.length > 1 ? result[1] : "获取失败",
-                            "已保存 " + maskKey(key)));
+                    respond(client, 200, formPage(base, maskKey(key), model, null,
+                            result.length > 1 ? result[1] : "获取失败", ""));
                 }
                 return;
             }
             if (!base.isEmpty() && !key.isEmpty() && model.isEmpty()) {
-                respond(client, 200, formPage(base, "", "",
-                        null, "模型要从云端获取后再选，不能留空。",
-                        "已保存 " + maskKey(key)));
+                respond(client, 200, formPage(base, maskKey(key), "",
+                        null, "模型要从云端获取后再选，不能留空。", ""));
                 return;
             }
             if (!base.isEmpty() && !key.isEmpty()) {
@@ -238,8 +235,8 @@ final class SoloConfig {
         String model = prefs.getString("soloModel", "");
         boolean hasKey = prefs.getString("soloKey", "").length() > 0;
         String masked = prefs.getString("soloKey", "");
-        respond(client, 200, formPage(base, "", model, null, null,
-                masked.isEmpty() ? "" : "已保存 " + maskKey(masked)));
+        respond(client, 200, formPage(base, masked.isEmpty() ? "" : maskKey(masked),
+                model, null, null, ""));
     }
 
     /** Current OpenAI-compatible endpoints, newest vendor domains. */
@@ -277,6 +274,9 @@ final class SoloConfig {
         form.append("<label>API Key</label>")
                 .append("<input name=key value=\"").append(escape(key)).append("\" placeholder=\"")
                 .append(escape(keyHint == null || keyHint.isEmpty() ? "sk-…" : keyHint)).append("\">");
+        form.append("<p class=hint>当前保存的 Key：")
+                .append(escape(key.isEmpty() ? "（还没有）" : key))
+                .append("　要更换就直接改上面的输入框。</p>");
         if (models != null && models.length > 0) {
             form.append("<label>模型（已从云端取到 ").append(models.length).append(" 个）</label>");
             form.append("<select name=model>");
