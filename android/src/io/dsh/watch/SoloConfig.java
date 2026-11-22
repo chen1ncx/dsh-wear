@@ -214,7 +214,7 @@ final class SoloConfig {
                         null, "模型要从云端获取后再选，不能留空。", ""));
                 return;
             }
-            if (!base.isEmpty() && !key.isEmpty()) {
+            if (fetch && !base.isEmpty() && !key.isEmpty()) {
                 prefs.edit()
                         .putString("soloBase", base)
                         .putString("soloKey", key)
@@ -223,7 +223,11 @@ final class SoloConfig {
                         .apply();
                 Listener target = listener;
                 if (target != null) target.onSaved(base, key, model);
-                respond(client, 200, page("已保存", "<p class=ok>已经写进手表，可以关掉这个页面了。</p>"));
+                String[] check = fetchModels(base, key);
+                String verdict = check[0] != null
+                        ? "<p class=ok>Key 可用，看到 " + check.length + " 个模型，可以关掉这个页面了。</p>"
+                        : "<p class=bad>已存进手表，但这把 Key 试调失败：" + escape(check[1]) + "</p>";
+                respond(client, 200, page("已保存", verdict));
                 return;
             }
             respond(client, 200, page("没保存", "<p class=bad>Base URL 和 API Key 都要填。</p>"));

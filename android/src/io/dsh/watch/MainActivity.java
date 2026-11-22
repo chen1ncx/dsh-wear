@@ -4210,7 +4210,8 @@ public class MainActivity extends Activity {
         soloLog.removeAllViews();
         if (soloStatus != null) {
             soloStatus.setText((soloModel().isEmpty() ? "未选模型" : soloModel())
-                    + " · " + soloHostLabel(soloBase()));
+                    + " · " + soloHostLabel(soloBase())
+                    + (soloKey == null || soloKey.isEmpty() ? "" : " · " + maskKey(soloKey)));
         }
         int count = soloMessages == null ? 0 : soloMessages.length();
         if (count == 0) {
