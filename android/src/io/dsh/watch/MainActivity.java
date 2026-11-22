@@ -3558,6 +3558,12 @@ public class MainActivity extends Activity {
     /** Side pages are built the first time they are reached. */
     void onPageChanged(int page) {
         Log.i(TAG, "page -> " + page);
+        // Unpaired: the conversation page has nothing to show, so the pair page
+        // is where the user belongs. A black page here reads as a broken app.
+        if (page == PAGE_TALK && token == null) {
+            if (!guideActive) showPair(null);
+            return;
+        }
         if (page == PAGE_PAIR && pagePair.getChildCount() == 0) buildPairPage(null);
         else if (page == PAGE_EXIT && pageExit.getChildCount() == 0) buildExitPage();
     }
