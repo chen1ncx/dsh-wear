@@ -710,6 +710,32 @@ public class MainActivity extends Activity {
                 && conversation.getChildAt(0) == view;
     }
 
+    /** Pages you came through, so the back arrow returns one step, not home. */
+    final java.util.ArrayDeque<View> history = new java.util.ArrayDeque<>();
+
+    View currentScreen() {
+        return conversation != null && conversation.getChildCount() > 0
+                ? conversation.getChildAt(0) : null;
+    }
+
+    /** Navigate to a page, remembering the one it replaces. */
+    void go(View page) {
+        View now = currentScreen();
+        if (now != null && now != page && !history.contains(page)) history.push(now);
+        showScreen(page);
+    }
+
+    /** One step back: the previous page, or the list at the bottom of the stack. */
+    void goBack() {
+        View previous = history.poll();
+        if (previous != null && previous.getParent() == null) {
+            showScreen(previous);
+            return;
+        }
+        history.clear();
+        showList();
+    }
+
     /** Put the conversation content (list or detail) into the middle page. */
     void showScreen(View view) {
         if (showing(view)) return;
@@ -794,7 +820,7 @@ public class MainActivity extends Activity {
     void updateIndicator(int page) {
         if (indicator == null) return;
         boolean reading = readingDetail || guideActive;
-        indicator.setVisibility(reading ? View.GONE : View.VISIBLE);
+        indicator.setVisibility(View.GONE);
         if (detailActions != null) {
             detailActions.setPadding(dp(6), dp(2), dp(6), reading ? dp(6) : dp(18));
         }
@@ -909,8 +935,9 @@ public class MainActivity extends Activity {
          */
         @Override
         public boolean onInterceptTouchEvent(MotionEvent ev) {
-            // While reading a conversation the pager stays put: leaving is the
-            // back arrow's job, and a stray sideways drag must not page away.
+            // Paging is gone: the list is the app; other screens are pages
+            // reached from the header buttons, not by swiping.
+            if (true) return false;
             if (readingDetail) return false;
             // The guide is a one-way door: read to the end, then tap 确认.
             if (guideActive) return false;
@@ -933,6 +960,10 @@ public class MainActivity extends Activity {
 
         @Override
         public boolean onTouchEvent(MotionEvent ev) {
+            return false;
+        }
+
+        boolean unusedTouchHandler(MotionEvent ev) {
             if (tracker == null) tracker = VelocityTracker.obtain();
             tracker.addMovement(ev);
             boolean handled = super.onTouchEvent(ev);
@@ -1013,11 +1044,171 @@ public class MainActivity extends Activity {
 
     void showPair(String message) {
         if (!prefs.getBoolean("guideDone", false)) {
-            buildGuidePage();
-        } else {
-            buildPairPage(message);
+            showGuidePage();
+            return;
         }
-        if (pager != null) pager.go(PAGE_PAIR);
+        showPairPage(message);
+    }
+
+    /** 配对：整屏二级页面，左上角返回。 */
+    void showPairPage(String message) {
+        buildPairPage(message);
+        if (screenPair != null) go(screenPair);
+        readingDetail = false;
+    }
+
+    /** 教程：整屏页面，滑到底点确认。 */
+    void showGuidePage() {
+        guideActive = true;
+        buildGuidePage();
+        if (screenPair != null) showScreen(screenPair);
+        readingDetail = false;
+    }
+
+    /** A secondary page: back arrow, title, then the body. */
+    LinearLayout secondary(String title) {
+        LinearLayout page = page();
+        page.setPadding(dp(8), dp(6), dp(8), dp(6));
+        LinearLayout head = row();
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("‹", 20, C_BLUE, true);
+        back.setPadding(dp(8), 0, dp(10), 0);
+        back.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                goBack();
+            }
+        });
+        head.addView(back, lp(-2, -2, 0, 0, 0, 0));
+        head.addView(text(title, 12, C_ACCENT, true), weight(1));
+        page.addView(head, fullWidth());
+        return page;
+    }
+
+    /** A tappable line: label, optional hint, and what it opens. */
+    View pageRow(String label, String hint, final Runnable action) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(10), dp(12), dp(10));
+        box.setBackground(bg(C_CARD, 14));
+        box.addView(text(label, 11, C_TEXT, false), fullWidth());
+        if (hint != null && !hint.isEmpty()) {
+            TextView sub = text(hint, 8, C_MUTED, false);
+            sub.setPadding(0, dp(1), 0, 0);
+            box.addView(sub, fullWidth());
+        }
+        box.setClickable(true);
+        box.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                action.run();
+            }
+        });
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(0, dp(2), 0, dp(4));
+        wrap.addView(box, fullWidth());
+        return wrap;
+    }
+
+    void showColumnPage() {
+        LinearLayout page = secondary("更多");
+        page.addView(pageRow("配对新设备", "换一台 DSH，或重新配一次", new Runnable() {
+            public void run() { showPairPage(null); }
+        }), fullWidth());
+        page.addView(pageRow("主题色", "八套配色，点了立刻生效", new Runnable() {
+            public void run() { showThemePage(); }
+        }), fullWidth());
+        readingDetail = false;
+        go(page);
+    }
+
+    void showSettingsPage() {
+        LinearLayout page = secondary("设置");
+        page.addView(pageRow("退出应用", "手表上的 DSH 会关掉", new Runnable() {
+            public void run() { confirmQuit(); }
+        }), fullWidth());
+        page.addView(pageRow("关于", "版本与来源", new Runnable() {
+            public void run() { showAboutPage(); }
+        }), fullWidth());
+        readingDetail = false;
+        go(page);
+    }
+
+    void confirmQuit() {
+        destructiveConfirm("退出应用？", "手表上的 DSH 会关掉，随时可以再打开", "退出", new Runnable() {
+            @Override
+            public void run() {
+                quitApp();
+            }
+        });
+    }
+
+    void showThemePage() {
+        LinearLayout page = secondary("主题色");
+        page.addView(themeGrid(), fullWidth());
+        readingDetail = false;
+        go(page);
+    }
+
+    /** Eight palette circles; tapping one applies it and returns to the list. */
+    View themeGrid() {
+        int current = prefs.getInt("theme", 0);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        for (int line = 0; line < 2; line += 1) {
+            LinearLayout row = row();
+            row.setGravity(Gravity.CENTER);
+            for (int col = 0; col < 4; col += 1) {
+                final int index = line * 4 + col;
+                View swatch = new View(this);
+                GradientDrawable shape = new GradientDrawable();
+                shape.setShape(GradientDrawable.OVAL);
+                shape.setColor(THEMES[index][3]);
+                if (index == current) shape.setStroke(dp(3), C_TEXT);
+                swatch.setBackground(shape);
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(34), dp(34));
+                params.setMargins(dp(5), dp(8), dp(5), dp(8));
+                swatch.setLayoutParams(params);
+                swatch.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        selectTheme(index);
+                        showList();
+                    }
+                });
+                row.addView(swatch);
+            }
+            box.addView(row, fullWidth());
+        }
+        return box;
+    }
+
+    void showAboutPage() {
+        String version;
+        try {
+            version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception no) {
+            version = "?";
+        }
+        LinearLayout page = secondary("关于");
+        TextView name = text("DSH on wear", 13, C_ACCENT, true);
+        name.setPadding(dp(8), dp(10), dp(8), 0);
+        page.addView(name, fullWidth());
+        TextView ver = text("版本 " + version, 9, C_MUTED, false);
+        ver.setPadding(dp(8), dp(2), dp(8), 0);
+        page.addView(ver, fullWidth());
+        TextView note = text("在手表上看 DSH 在做什么、回话、审批、换模型。", 9, C_TEXT, false);
+        note.setPadding(dp(8), dp(10), dp(8), 0);
+        page.addView(note, fullWidth());
+        TextView ai = text("界面与代码由 AI 生成", 8, C_MUTED, false);
+        ai.setPadding(dp(8), dp(6), dp(8), 0);
+        page.addView(ai, fullWidth());
+        TextView repo = text("github.com/chen1ncx/dsh-wear", 8, C_BLUE, false);
+        repo.setPadding(dp(8), dp(10), dp(8), 0);
+        page.addView(repo, fullWidth());
+        readingDetail = false;
+        go(page);
     }
 
     /** First run: what to install on the host, with a copyable command block. */
@@ -1033,10 +1224,6 @@ public class MainActivity extends Activity {
             pairScroll.addView(pairContent, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             screenPair.addView(pairScroll, weightV());
-        }
-        if (pagePair.getChildCount() == 0) {
-            pagePair.addView(screenPair, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         pairContent.removeAllViews();
 
@@ -1070,8 +1257,7 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 prefs.edit().putBoolean("guideDone", true).apply();
                 guideActive = false;
-                buildPairPage(null);
-                refreshIndicatorSoon();
+                showPairPage(null);
             }
         });
         LinearLayout okRow = row();
@@ -1141,14 +1327,20 @@ public class MainActivity extends Activity {
             screenPair.addView(pairScroll, weightV());
         }
         String typedUrl = pairUrl == null ? null : pairUrl.getText().toString().trim();
-        if (pagePair.getChildCount() == 0) {
-            pagePair.addView(screenPair, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        }
         pairContent.removeAllViews();
 
         LinearLayout head = row();
-        head.setPadding(dp(10), dp(8), dp(10), dp(2));
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(8), dp(6), dp(10), dp(2));
+        TextView pairBack = text("‹", 20, C_BLUE, true);
+        pairBack.setPadding(dp(6), 0, dp(8), 0);
+        pairBack.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                goBack();
+            }
+        });
+        head.addView(pairBack, lp(-2, -2, 0, 0, 0, 0));
         head.addView(text("配对 DSH", 13, C_ACCENT, true), weight(1));
         pairContent.addView(head, fullWidth());
 
@@ -1328,7 +1520,7 @@ public class MainActivity extends Activity {
             menu.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    toast("栏目菜单还没接上");
+                    showColumnPage();
                 }
             });
             tools.addView(menu, lp(dp(26), dp(22), 0, 0, 0, 0));
@@ -1337,7 +1529,7 @@ public class MainActivity extends Activity {
             gear.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    toast("设置还没接上");
+                    showSettingsPage();
                 }
             });
             tools.addView(gear, lp(dp(26), dp(22), 0, 0, 0, 0));
@@ -1385,6 +1577,7 @@ public class MainActivity extends Activity {
             screenList.addView(listEmpty, weightV());
         }
         readingDetail = false;
+        history.clear();
         showScreen(screenList);
         // Only the fields we actually draw decide a rebuild: the payload carries
         // timestamps that change on every poll and used to rebuild the list
@@ -3654,11 +3847,6 @@ public class MainActivity extends Activity {
         toast("换好了");
     }
 
-    @Override
-    public void onBackPressed() {
-        goBack();
-    }
-
     /** Leave without the platform's activity zoom/fade. */
     void quitApp() {
         ui.removeCallbacks(ticker);
@@ -3666,22 +3854,20 @@ public class MainActivity extends Activity {
         overridePendingTransition(0, 0);
     }
 
-    /** Back: leave any side page, then leave the detail, then open the exit page. */
-    void goBack() {
-        Log.i(TAG, "goBack page=" + pageIndex);
-        if (pageIndex != PAGE_TALK) {
-            pager.go(PAGE_TALK);
-            if (token == null) showPair(null); else showList();
-            return;
-        }
+    /** System back: one step out of the current screen. */
+    @Override
+    public void onBackPressed() {
         if (showing(screenDetail)) {
             selectedId = null;
             showList();
             refreshNow(true);
             return;
         }
-        pager.go(PAGE_EXIT);
-        showExit();
+        if (currentScreen() != null && !showing(screenList)) {
+            goBack();
+            return;
+        }
+        super.onBackPressed();
     }
 
     // ============================================================== widgets
@@ -3717,6 +3903,8 @@ public class MainActivity extends Activity {
         final Runnable hold;
         float downX;
         float downY;
+        /** A drag is not a tap: it must not open the conversation. */
+        boolean moved;
         boolean opened;
         long openedAt;
 
@@ -3758,6 +3946,7 @@ public class MainActivity extends Activity {
             content.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
+                    if (moved) return;
                     if (opened) {
                         // The lift that opened the row also arrives as a click;
                         // ignore that one, then a real tap closes it.
@@ -3788,11 +3977,13 @@ public class MainActivity extends Activity {
                 case MotionEvent.ACTION_DOWN:
                     downX = ev.getX();
                     downY = ev.getY();
+                    moved = false;
                     removeCallbacks(hold);
                     postDelayed(hold, 400);
                     break;
                 case MotionEvent.ACTION_MOVE:
                     if (Math.abs(ev.getX() - downX) > dp(8) || Math.abs(ev.getY() - downY) > dp(8)) {
+                        moved = true;
                         removeCallbacks(hold);
                     }
                     break;
