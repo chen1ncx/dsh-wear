@@ -242,15 +242,6 @@ public class MainActivity extends Activity {
         try {
             getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                     WindowManager.LayoutParams.FLAG_FULLSCREEN);
-            body.addView(pageRow("切回远程连接", "回到连接 DSH 的模式", new Runnable() {
-            public void run() {
-                mode = "host";
-                saveSoloConfig();
-                history.clear();
-                showList();
-            }
-        }), fullWidth());
-
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             getWindow().setBackgroundDrawable(new ColorDrawable(C_BG));
             prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -3996,6 +3987,14 @@ public class MainActivity extends Activity {
             }
         });
         body.addView(save, lp(-1, dp(34), 0, dp(8), 0, 0));
+        body.addView(pageRow("切回远程连接", "回到连接 DSH 的模式", new Runnable() {
+            public void run() {
+                mode = "host";
+                saveSoloConfig();
+                history.clear();
+                showList();
+            }
+        }), fullWidth());
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         TextView tip = text("手机扫码填（手表保持亮屏，关屏就断了）", 8, C_MUTED, false);
