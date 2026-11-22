@@ -105,6 +105,8 @@ public class MainActivity extends Activity {
     int C_ERR_BG;
     int C_BLUE;
     int C_LINE;
+    /** Frame colour of the conversation cards, a step lighter than the fill. */
+    int C_EDGE;
 
     /** bg, card, cardHi, accent, onAccent, tertiary, error, errorBg */
     static final int[][] THEMES = {
@@ -117,6 +119,14 @@ public class MainActivity extends Activity {
             {0xFF171210, 0xFF231B17, 0xFF2D231E, 0xFFF4B08A, 0xFF4A2200, 0xFFF0D2BE, 0xFFF2B8B5, 0xFF8C1D18},
             {0xFF121316, 0xFF1C1D22, 0xFF26272D, 0xFFC7CBE0, 0xFF1F2333, 0xFFDDE1F5, 0xFFF2B8B5, 0xFF8C1D18},
     };
+
+    /** Lighten `from` toward `toward` by `amount`, keeping it opaque. */
+    static int blend(int from, int toward, float amount) {
+        int r = (int) (((from >> 16) & 0xFF) + (((toward >> 16) & 0xFF) - ((from >> 16) & 0xFF)) * amount);
+        int g = (int) (((from >> 8) & 0xFF) + (((toward >> 8) & 0xFF) - ((from >> 8) & 0xFF)) * amount);
+        int b = (int) ((from & 0xFF) + ((toward & 0xFF) - (from & 0xFF)) * amount);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
 
     void applyTheme(int index) {
         Log.i(TAG, "applyTheme " + index);
@@ -133,6 +143,8 @@ public class MainActivity extends Activity {
         C_TEXT = 0xFFE6E0E9;
         C_MUTED = 0xFFCAC4D0;
         C_LINE = 0xFF49454F;
+        C_EDGE = (C_CARD_HI & 0x00FFFFFF) | 0xFF000000;
+        C_EDGE = blend(C_CARD, 0xFFFFFFFF, 0.16f);
         Log.i(TAG, "  bg=" + Integer.toHexString(C_BG) + " accent=" + Integer.toHexString(C_ACCENT));
     }
 
@@ -781,7 +793,7 @@ public class MainActivity extends Activity {
 
     void updateIndicator(int page) {
         if (indicator == null) return;
-        boolean reading = readingDetail;
+        boolean reading = readingDetail || guideActive;
         indicator.setVisibility(reading ? View.GONE : View.VISIBLE);
         if (detailActions != null) {
             detailActions.setPadding(dp(6), dp(2), dp(6), reading ? dp(6) : dp(18));
@@ -900,6 +912,8 @@ public class MainActivity extends Activity {
             // While reading a conversation the pager stays put: leaving is the
             // back arrow's job, and a stray sideways drag must not page away.
             if (readingDetail) return false;
+            // The guide is a one-way door: read to the end, then tap 确认.
+            if (guideActive) return false;
             if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 downX = ev.getX();
                 downY = ev.getY();
@@ -998,8 +1012,120 @@ public class MainActivity extends Activity {
     }
 
     void showPair(String message) {
-        buildPairPage(message);
+        if (!prefs.getBoolean("guideDone", false)) {
+            buildGuidePage();
+        } else {
+            buildPairPage(message);
+        }
         if (pager != null) pager.go(PAGE_PAIR);
+    }
+
+    /** First run: what to install on the host, with a copyable command block. */
+    void buildGuidePage() {
+        guideActive = true;
+        refreshIndicatorSoon();
+        if (screenPair == null) {
+            screenPair = page();
+            pairScroll = new ScrollView(this);
+            pairContent = new LinearLayout(this);
+            pairContent.setOrientation(LinearLayout.VERTICAL);
+            pairScroll.setFillViewport(true);
+            pairScroll.addView(pairContent, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            screenPair.addView(pairScroll, weightV());
+        }
+        if (pagePair.getChildCount() == 0) {
+            pagePair.addView(screenPair, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        pairContent.removeAllViews();
+
+        LinearLayout head = row();
+        head.setPadding(dp(10), dp(8), dp(10), dp(2));
+        head.addView(text("第一次使用", 13, C_ACCENT, true), weight(1));
+        pairContent.addView(head, fullWidth());
+
+        pairContent.addView(guideLine("1", "在要连的那台电脑或手机上装插件（命令整段复制）"));
+        pairContent.addView(guideCode("cd /tmp && rm -rf dsh-wear && git clone --depth 1 https://github.com/chen1ncx/dsh-wear.git dsh-wear\n"
+                + "P=$(readlink -f ~/.dsh/profiles/web/node_modules/dsh-watch-bridge)\n"
+                + "[ -d \"$P\" ] || P=~/dsh-watch-bridge\n"
+                + "cp -f dsh-wear/lib/index.js \"$P/lib/index.js\"\n"
+                + "cp -f dsh-wear/package.json \"$P/package.json\""));
+
+        pairContent.addView(guideLine("2", "重启那台机器上的 DSH，插件就生效了"));
+        pairContent.addView(guideCode("curl -s http://127.0.0.1:8787/api/hello"));
+        pairContent.addView(guideLine("3", "在 DSH 里让我给你一个配对码（10 分钟内有效）"));
+        pairContent.addView(guideLine("4", "把地址和配对码填到下一页，点「连接」"));
+
+        TextView tip = text("地址形如 http://192.168.1.5:8787，手机和手表要在同一个 Wi-Fi。",
+                9, C_MUTED, false);
+        tip.setPadding(dp(10), dp(4), dp(10), dp(8));
+        pairContent.addView(tip, fullWidth());
+
+        Button ok = roundKey("确认", C_ACCENT);
+        ok.setTextColor(C_ON_ACCENT);
+        ok.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        ok.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs.edit().putBoolean("guideDone", true).apply();
+                guideActive = false;
+                buildPairPage(null);
+                refreshIndicatorSoon();
+            }
+        });
+        LinearLayout okRow = row();
+        okRow.setPadding(dp(10), dp(4), dp(10), dp(10));
+        okRow.addView(ok, weightH(30));
+        pairContent.addView(okRow, fullWidth());
+    }
+
+    /** "1" style step caption. */
+    View guideLine(String number, String body) {
+        LinearLayout line = row();
+        line.setPadding(dp(10), dp(6), dp(10), 0);
+        TextView badge = text(number, 9, C_ON_ACCENT, true);
+        badge.setGravity(Gravity.CENTER);
+        badge.setBackground(bg(C_ACCENT, 8));
+        line.addView(badge, lp(dp(16), dp(16), 0, 0, 7, 0));
+        TextView label = text(body, 9, C_TEXT, false);
+        line.addView(label, weight(1));
+        return line;
+    }
+
+    /** Copyable command block: a button beats long-press on a 1-inch screen. */
+    View guideCode(final String command) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(6), dp(8), dp(6));
+        box.setBackground(bg(C_CARD, 12));
+
+        TextView code = text(command, 8, C_MUTED, false);
+        code.setTypeface(Typeface.MONOSPACE);
+        code.setTextIsSelectable(true);
+        box.addView(code, fullWidth());
+
+        Button copy = outlinePill("复制命令");
+        copy.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+        copy.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                android.content.ClipboardManager clipboard =
+                        (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("dsh", command));
+                toast("复制好了");
+            }
+        });
+        LinearLayout copyRow = row();
+        copyRow.setGravity(Gravity.RIGHT);
+        copyRow.addView(copy, lp(-2, dp(24), 0, 4, 0, 0));
+        box.addView(copyRow, fullWidth());
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(10), dp(4), dp(10), dp(2));
+        wrap.addView(box, fullWidth());
+        return wrap;
     }
 
     void buildPairPage(String message) {
@@ -1133,6 +1259,11 @@ public class MainActivity extends Activity {
     boolean showArchived;
     TextView listEmpty;
     TextView statusDot;
+    SwipeRow openSwipe;
+    /** First-run guide owns the screen: no paging, no pill, only 确认 moves on. */
+    boolean guideActive;
+    /** Signature of what the list currently shows; a poll rebuilds only on change. */
+    int listSig;
     String pendingDelete;
     boolean needsAuth;
 
@@ -1229,31 +1360,21 @@ public class MainActivity extends Activity {
             listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
                 @Override
                 public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                    if (openSwipe != null) {
+                        // The finger that just opened the row also lifts here; do
+                        // not treat that release as "tap outside to close".
+                        if (System.currentTimeMillis() - openSwipe.openedAt < 400) return;
+                        openSwipe.close();
+                        return;
+                    }
                     if (position < rows.size()) {
                         if (ARCHIVE_TOGGLE.equals(rows.get(position).id)) {
                             showArchived = !showArchived;
                             bindSessions();
                             return;
                         }
-                        selectedId = rows.get(position).id;
-                        finishedUnseen.remove(selectedId);
-                        saveFinished();
-                        cancelDoneNote();
-                        lastPending = -1;
-                        state = null;
-                        showDetail();
-                        refreshNow(true);
+                        openConversation(rows.get(position));
                     }
-                }
-            });
-            listView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
-                @Override
-                public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-                    if (position >= rows.size()) return false;
-                    Session s = rows.get(position);
-                    if (ARCHIVE_TOGGLE.equals(s.id)) return false;
-                    confirmDelete(s);
-                    return true;
                 }
             });
             screenList.addView(listView, weightV());
@@ -1265,7 +1386,31 @@ public class MainActivity extends Activity {
         }
         readingDetail = false;
         showScreen(screenList);
-        bindSessions();
+        // Only the fields we actually draw decide a rebuild: the payload carries
+        // timestamps that change on every poll and used to rebuild the list
+        // (and close an open row) every four seconds.
+        int sig = listSignature();
+        if (openSwipe != null) return;
+        if (sig != listSig || adapter == null) {
+            listSig = sig;
+            bindSessions();
+        }
+    }
+
+    /** Hash of the visible list state: stable while nothing on screen changed. */
+    int listSignature() {
+        int sig = 31 + (showArchived ? 7 : 0) + finishedUnseen.hashCode() + rows.size();
+        JSONArray list = sessions;
+        for (int i = 0; list != null && i < list.length(); i += 1) {
+            JSONObject item = list.optJSONObject(i);
+            if (item == null) continue;
+            sig = sig * 31 + item.optString("id", "").hashCode();
+            sig = sig * 31 + item.optString("title", "").hashCode();
+            sig = sig * 31 + (item.optBoolean("running", false) ? 1 : 0);
+            sig = sig * 31 + (item.optBoolean("archived", false) ? 1 : 0);
+            sig = sig * 31 + item.optInt("pending", 0);
+        }
+        return sig;
     }
 
     void bindSessions() {
@@ -3420,6 +3565,12 @@ public class MainActivity extends Activity {
     /** Side pages are built the first time they are reached. */
     void onPageChanged(int page) {
         Log.i(TAG, "page -> " + page);
+        // Unpaired: the conversation page has nothing to show, so the pair page
+        // is where the user belongs. A black page here reads as a broken app.
+        if (page == PAGE_TALK && token == null) {
+            if (!guideActive) showPair(null);
+            return;
+        }
         if (page == PAGE_PAIR && pagePair.getChildCount() == 0) buildPairPage(null);
         else if (page == PAGE_EXIT && pageExit.getChildCount() == 0) buildExitPage();
     }
@@ -3554,6 +3705,138 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * A row that slides aside when it is held, to expose 归档 and 删除.
+     * A plain sideways drag is left alone: that gesture turns the page.
+     */
+    class SwipeRow extends FrameLayout {
+        final Session session;
+        final View content;
+        final LinearLayout actions;
+        final int actionWidth;
+        final Runnable hold;
+        float downX;
+        float downY;
+        boolean opened;
+        long openedAt;
+
+        SwipeRow(Session session, View content) {
+            super(MainActivity.this);
+            this.session = session;
+            this.content = content;
+            actionWidth = dp(56) * 2;
+
+            actions = row();
+            actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            TextView archive = actionButton(session.archived ? "取消归档" : "归档", C_CARD_HI, C_TEXT);
+            archive.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    close();
+                    toggleArchive(session);
+                }
+            });
+            actions.addView(archive, new LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.MATCH_PARENT));
+            TextView delete = actionButton("删除", C_ERR_BG, 0xFF131313);
+            delete.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    close();
+                    confirmDelete(session);
+                }
+            });
+            actions.addView(delete, new LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.MATCH_PARENT));
+
+            FrameLayout.LayoutParams actionParams = new FrameLayout.LayoutParams(
+                    actionWidth, ViewGroup.LayoutParams.MATCH_PARENT);
+            actionParams.gravity = Gravity.RIGHT;
+            addView(actions, actionParams);
+            addView(content, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            actions.setVisibility(View.INVISIBLE);
+
+            content.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (opened) {
+                        // The lift that opened the row also arrives as a click;
+                        // ignore that one, then a real tap closes it.
+                        if (System.currentTimeMillis() - openedAt < 500) return;
+                        close();
+                        return;
+                    }
+                    openConversation(session);
+                }
+            });
+
+            // 200ms of stillness opens the actions; anything that moves is a
+            // scroll or a page swipe and cancels the timer.
+            hold = new Runnable() {
+                @Override
+                public void run() {
+                    // Pressing an already-open row puts it back: that is how a
+                    // user expects to dismiss it.
+                    if (opened) close();
+                    else openRow(SwipeRow.this);
+                }
+            };
+        }
+
+        @Override
+        public boolean dispatchTouchEvent(MotionEvent ev) {
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = ev.getX();
+                    downY = ev.getY();
+                    removeCallbacks(hold);
+                    postDelayed(hold, 400);
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(ev.getX() - downX) > dp(8) || Math.abs(ev.getY() - downY) > dp(8)) {
+                        removeCallbacks(hold);
+                    }
+                    break;
+                default:
+                    removeCallbacks(hold);
+                    break;
+            }
+            return super.dispatchTouchEvent(ev);
+        }
+
+        void openRow(SwipeRow row) {
+            if (openSwipe != null && openSwipe != row) openSwipe.closeQuiet();
+            openSwipe = row;
+            row.opened = true;
+            row.openedAt = System.currentTimeMillis();
+            row.actions.setVisibility(View.VISIBLE);
+            row.content.animate().translationX(-row.actionWidth).setDuration(140).start();
+            row.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        }
+
+        void closeQuiet() {
+            opened = false;
+            content.animate().translationX(0).setDuration(110).start();
+            actions.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (!opened) actions.setVisibility(View.INVISIBLE);
+                }
+            }, 130);
+        }
+
+        void close() {
+            opened = false;
+            if (openSwipe == this) openSwipe = null;
+            content.animate().translationX(0).setDuration(140).start();
+            actions.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (!opened) actions.setVisibility(View.INVISIBLE);
+                }
+            }, 150);
+        }
+    }
+
     class SessionAdapter extends BaseAdapter {
         @Override
         public int getCount() {
@@ -3575,7 +3858,8 @@ public class MainActivity extends Activity {
             LinearLayout row = new LinearLayout(MainActivity.this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(8), dp(5), dp(8), dp(5));
+            row.setPadding(dp(9), dp(10), dp(9), dp(10));
+            row.setMinimumHeight(dp(38));
             row.setBackground(rowState());
 
             Session s = rows.get(position);
@@ -3612,7 +3896,8 @@ public class MainActivity extends Activity {
                 badge.setPadding(dp(5), 0, dp(5), 0);
                 row.addView(badge, lp(-2, dp(16), 4, 0, 0, 0));
             }
-            return row;
+            // The card slides aside to expose 归档 / 删除.
+            return new SwipeRow(s, row);
         }
     }
 
@@ -3695,6 +3980,58 @@ public class MainActivity extends Activity {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(dp(24));
+        return drawable;
+    }
+
+    /** Enter one conversation; used by both the list row and its inner card. */
+    void openConversation(Session session) {
+        if (openSwipe != null) {
+            openSwipe.close();
+            return;
+        }
+        selectedId = session.id;
+        finishedUnseen.remove(selectedId);
+        saveFinished();
+        cancelDoneNote();
+        lastPending = -1;
+        state = null;
+        showDetail();
+        refreshNow(true);
+    }
+
+    TextView actionButton(String label, int background, int foreground) {
+        TextView view = text(label, 10, foreground, true);
+        view.setGravity(Gravity.CENTER);
+        view.setBackground(bg(background, 18));
+        return view;
+    }
+
+    /** Archive (or bring back) one conversation. */
+    void toggleArchive(final Session session) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("session", session.id);
+        } catch (Exception ignored) {
+        }
+        String path = session.archived ? "/api/unarchive" : "/api/archive";
+        api("POST", path, body, new Callback() {
+            @Override
+            public void onOk(JSONObject response) {
+                toast(session.archived ? "已取消归档" : "已归档");
+                refreshNow(true);
+            }
+
+            @Override
+            public void onErr(String message, int status) {
+                toast(status == 501 ? "服务器插件要升级到 0.3.6" : "归档失败: " + message);
+            }
+        });
+    }
+
+    /** Conversation card: a visible frame, not just a fill. */
+    GradientDrawable card(int color, float radius) {
+        GradientDrawable drawable = bg(color, radius);
+        drawable.setStroke(dp(1.5f), C_EDGE);
         return drawable;
     }
 
