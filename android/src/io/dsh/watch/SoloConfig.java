@@ -243,13 +243,38 @@ final class SoloConfig {
                 masked.isEmpty() ? "" : "已保存 " + maskKey(masked)));
     }
 
+    /** Current OpenAI-compatible endpoints, newest vendor domains. */
+    private static final String[][] PROVIDERS = {
+            {"DeepSeek", "https://api.deepseek.com/v1"},
+            {"阿里云百炼（通义）", "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+            {"火山方舟（豆包）", "https://ark.cn-beijing.volces.com/api/v3"},
+            {"智谱 GLM", "https://open.bigmodel.cn/api/paas/v4"},
+            {"月之暗面 Kimi", "https://api.moonshot.cn/v1"},
+            {"MiniMax", "https://api.minimax.cn/v1"},
+            {"硅基流动", "https://api.siliconflow.cn/v1"},
+            {"百度千帆", "https://qianfan.baidubce.com/v2"},
+            {"腾讯混元", "https://api.hunyuan.cloud.tencent.com/v1"},
+            {"阶跃星辰", "https://api.stepfun.com/v1"},
+            {"OpenAI", "https://api.openai.com/v1"},
+            {"OpenRouter", "https://openrouter.ai/api/v1"},
+            {"xAI Grok", "https://api.x.ai/v1"},
+            {"Gemini（OpenAI 兼容）", "https://generativelanguage.googleapis.com/v1beta/openai"},
+    };
+
     /** The whole config page: base, key, then either a text field or a model list. */
     private static String formPage(String base, String key, String model,
                                    String[] models, String error, String keyHint) {
         StringBuilder form = new StringBuilder();
         form.append("<form method=post action=/save>");
+        form.append("<label>供应商</label>")
+                .append("<select id=pick onchange=\"document.getElementById('base').value=this.value\">");
+        for (String[] provider : PROVIDERS) {
+            form.append("<option value=\"").append(escape(provider[1])).append("\">")
+                    .append(escape(provider[0])).append("</option>");
+        }
+        form.append("</select>");
         form.append("<label>Base URL</label>")
-                .append("<input name=base value=\"").append(escape(base)).append("\" placeholder=\"https://api.deepseek.com/v1\">");
+                .append("<input id=base name=base value=\"").append(escape(base)).append("\" placeholder=\"https://api.deepseek.com/v1\">");
         form.append("<label>API Key</label>")
                 .append("<input name=key value=\"").append(escape(key)).append("\" placeholder=\"")
                 .append(escape(keyHint == null || keyHint.isEmpty() ? "sk-…" : keyHint)).append("\">");
@@ -332,6 +357,7 @@ final class SoloConfig {
                 + "body{font:15px/1.5 -apple-system,system-ui,sans-serif;margin:24px;background:#0e1116;color:#e8edf5}"
                 + "h3{margin:0 0 16px;font-size:17px}"
                 + "label{display:block;margin:14px 0 6px;color:#8b98ab;font-size:13px}"
+                + "select{width:100%;box-sizing:border-box;padding:11px;border-radius:10px;border:1px solid #2a3444;background:#161c25;color:#e8edf5;font-size:15px}"
                 + "input{width:100%;box-sizing:border-box;padding:11px;border-radius:10px;border:1px solid #2a3444;background:#161c25;color:#e8edf5;font-size:15px}"
                 + "button{margin-top:18px;width:100%;padding:13px;border:0;border-radius:11px;background:#7ac4ff;color:#0b1220;font-size:16px;font-weight:600}"
                 + "button.ghost{background:#243044;color:#cfe0f5;margin-top:10px}"
