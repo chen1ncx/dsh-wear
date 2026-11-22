@@ -3622,6 +3622,13 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** The phone page writes prefs directly; pick those up before any call. */
+    void refreshSoloConfig() {
+        soloBase = prefs.getString("soloBase", soloBase);
+        soloKey = prefs.getString("soloKey", soloKey);
+        soloModel = prefs.getString("soloModel", soloModel);
+    }
+
     void saveSoloConfig() {
         prefs.edit()
                 .putString("mode", mode)
@@ -3737,17 +3744,22 @@ public class MainActivity extends Activity {
                 String typedKey = key.getText().toString().trim();
                 // An empty box means "keep what is stored", never "erase it".
                 if (!typedKey.isEmpty()) soloKey = typedKey;
-                soloModel = model.getText().toString().trim();
+                String picked = model.getText().toString().trim();
+                if (!picked.isEmpty() && !"未选择".equals(picked)) soloModel = picked;
                 if (soloKey == null || soloKey.isEmpty()) {
                     toast("API Key 不能为空");
                     return;
                 }
-                if (soloModel.isEmpty() || "未选择".equals(soloModel)) {
-                    toast("先点右边获取模型");
-                    return;
-                }
+                // Base URL and key are always stored; only the model is required
+                // to actually start talking, so the key can be fixed even when
+                // the current one is rejected.
                 mode = "solo";
                 saveSoloConfig();
+                if (soloModel.isEmpty()) {
+                    toast("Key 已保存，点「获取」选个模型");
+                    showSoloConfig(null);
+                    return;
+                }
                 history.clear();
                 showSoloChat();
             }
@@ -3898,6 +3910,7 @@ public class MainActivity extends Activity {
                     @Override
                     public void run() {
                         toast("手机填好了，已保存");
+                        refreshSoloConfig();
                         history.clear();
                         showSoloChat();
                     }
@@ -4146,6 +4159,7 @@ public class MainActivity extends Activity {
 
     /** One blocking call to /chat/completions; the reply replaces the empty bubble. */
     void callSoloApi() {
+        refreshSoloConfig();
         String error = null;
         String answer = "";
         HttpURLConnection conn = null;
