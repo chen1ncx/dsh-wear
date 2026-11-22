@@ -3601,8 +3601,7 @@ public class MainActivity extends Activity {
     // ============================================================== 独立模式
 
     String soloBase() {
-        // Same shape as the phone app's OpenAI-compatible endpoint.
-        return soloBase == null || soloBase.isEmpty() ? "https://api.deepseek.com/v1" : soloBase;
+        return soloBase == null ? "" : soloBase;
     }
 
     String soloModel() {
@@ -3622,21 +3621,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** A bare host is not an API endpoint: fill in the path the provider expects. */
+    /** Only trims: the URL is whatever was typed, never guessed. */
     String normalizeBase(String value) {
         if (value == null) return "";
         String url = value.trim();
         while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
-        String rest = url.replaceFirst("^https?://", "");
-        if (rest.contains("/")) return url;
-        if (rest.endsWith("api.deepseek.com")) return url + "/v1";
-        if (rest.endsWith("api.moonshot.cn")) return url + "/v1";
-        if (rest.endsWith("api.siliconflow.cn")) return url + "/v1";
-        if (rest.endsWith("api.openai.com")) return url + "/v1";
-        if (rest.endsWith("dashscope.aliyuncs.com")) return url + "/compatible-mode/v1";
-        if (rest.endsWith("open.bigmodel.cn")) return url + "/api/paas/v4";
-        if (rest.endsWith("ark.cn-beijing.volces.com")) return url + "/api/v3";
-        return url + "/v1";
+        return url;
     }
 
     /** The phone page writes prefs directly; pick those up before any call. */
@@ -3971,6 +3961,10 @@ public class MainActivity extends Activity {
                 soloBase = normalizeBase(soloBase);
                 String picked = model.getText().toString().trim();
                 if (!picked.isEmpty() && !"未选择".equals(picked)) soloModel = picked;
+                if (soloBase().isEmpty()) {
+                    toast("Base URL 不能为空");
+                    return;
+                }
                 if (soloKey == null || soloKey.isEmpty()) {
                     toast("API Key 不能为空");
                     return;

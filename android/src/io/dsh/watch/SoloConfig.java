@@ -235,7 +235,6 @@ final class SoloConfig {
 
         SharedPreferences prefs = context.getSharedPreferences("dshwatch", Context.MODE_PRIVATE);
         String base = prefs.getString("soloBase", "");
-        if (base.isEmpty()) base = "https://api.deepseek.com/v1";
         String model = prefs.getString("soloModel", "");
         boolean hasKey = prefs.getString("soloKey", "").length() > 0;
         String masked = prefs.getString("soloKey", "");
