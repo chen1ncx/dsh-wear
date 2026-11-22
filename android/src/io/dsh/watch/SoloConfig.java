@@ -230,7 +230,12 @@ final class SoloConfig {
                 respond(client, 200, page("已保存", verdict));
                 return;
             }
-            respond(client, 200, page("没保存", "<p class=bad>Base URL 和 API Key 都要填。</p>"));
+            String missing = base.isEmpty() && key.isEmpty() ? "Base URL 和 API Key"
+                    : base.isEmpty() ? "Base URL" : "API Key";
+            respond(client, 200, page("没保存",
+                    "<p class=bad>还差 " + missing + "。</p>"
+                            + "<p class=hint>Base URL 可以先在上面选供应商，会自动填进来；"
+                            + "API Key 要整段填（sk-…）。</p>"));
             return;
         }
 
@@ -273,7 +278,7 @@ final class SoloConfig {
                     .append(escape(provider[0])).append("</option>");
         }
         form.append("</select>");
-        form.append("<label>Base URL</label>")
+        form.append("<label>Base URL" + (base.isEmpty() ? "（必填，现在是空的）" : "") + "</label>")
                 .append("<input id=base name=base value=\"").append(escape(base)).append("\" placeholder=\"https://api.deepseek.com/v1\">");
         form.append("<label>API Key</label>")
                 .append("<input name=key value=\"").append(escape(key)).append("\" placeholder=\"")
