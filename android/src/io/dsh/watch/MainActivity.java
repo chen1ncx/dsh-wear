@@ -3626,7 +3626,6 @@ public class MainActivity extends Activity {
         mode = prefs.getString("mode", "host");
         soloBase = prefs.getString("soloBase", "");
         soloKey = prefs.getString("soloKey", "");
-        if (soloKey != null && soloKey.contains("****")) soloKey = "";
         soloModel = prefs.getString("soloModel", "");
         soloMessages = null;
         try {
@@ -3650,10 +3649,7 @@ public class MainActivity extends Activity {
         soloKey = prefs.getString("soloKey", soloKey);
         soloModel = prefs.getString("soloModel", soloModel);
         // A masked placeholder must never be treated as a real key.
-        if (soloKey != null && soloKey.contains("****")) {
-            soloKey = "";
-            prefs.edit().remove("soloKey").apply();
-        }
+
     }
 
     void saveSoloConfig() {
@@ -3916,18 +3912,18 @@ public class MainActivity extends Activity {
         body.addView(baseWrap, fullWidth());
 
         LinearLayout keyWrap = (LinearLayout) valueRow(
-                "API Key", soloKey == null || soloKey.isEmpty() ? "未填写" : maskKey(soloKey),
+                "API Key", soloKey == null || soloKey.isEmpty() ? "未填写" : soloKey,
                 new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        editTextDialog("API Key", soloKey == null || soloKey.isEmpty() ? "" : maskKey(soloKey), "sk-…", new TextReady() {
+                        editTextDialog("API Key", soloKey == null ? "" : soloKey, "sk-…", new TextReady() {
                             @Override
                             public void onText(String value) {
-                                if (value.isEmpty() || value.contains("****")) return;
+                                if (value.isEmpty()) return;
                                 soloKey = value;
                                 keyEdited = true;
                                 ((TextView) ((LinearLayout) ((LinearLayout) v.getParent())
-                                        .getChildAt(0)).getChildAt(1)).setText(maskKey(soloKey));
+                                        .getChildAt(0)).getChildAt(1)).setText(soloKey);
                             }
                         });
                     }
@@ -4216,8 +4212,7 @@ public class MainActivity extends Activity {
         soloLog.removeAllViews();
         if (soloStatus != null) {
             soloStatus.setText((soloModel().isEmpty() ? "未选模型" : soloModel())
-                    + " · " + soloHostLabel(soloBase())
-                    + (soloKey == null || soloKey.isEmpty() ? "" : " · " + maskKey(soloKey)));
+                    + " · " + soloHostLabel(soloBase()));
         }
         int count = soloMessages == null ? 0 : soloMessages.length();
         if (count == 0) {

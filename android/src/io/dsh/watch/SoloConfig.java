@@ -187,7 +187,7 @@ final class SoloConfig {
             SharedPreferences prefs = context.getSharedPreferences("dshwatch", Context.MODE_PRIVATE);
             String base = "";
             String key = prefs.getString("soloKey", "");
-            if (key.contains("****")) key = "";
+
             String model = "";
             boolean fetch = false;
             for (String pair : body.split("&")) {
@@ -196,7 +196,7 @@ final class SoloConfig {
                 String name = pair.substring(0, eq);
                 String val = URLDecoder.decode(pair.substring(eq + 1), "UTF-8").trim();
                 if ("base".equals(name)) base = val;
-                else if ("key".equals(name) && !val.isEmpty() && !val.contains("****")) key = val;
+                else if ("key".equals(name) && !val.isEmpty()) key = val;
                 else if ("model".equals(name)) model = val;
                 else if ("fetch".equals(name)) fetch = true;
             }
@@ -213,15 +213,15 @@ final class SoloConfig {
             if (fetch) {
                 String[] result = fetchModels(base, key);
                 if (result[0] != null) {
-                    respond(client, 200, formPage(base, maskKey(key), model, result, null, ""));
+                    respond(client, 200, formPage(base, key, model, result, null, ""));
                 } else {
-                    respond(client, 200, formPage(base, maskKey(key), model, null,
+                    respond(client, 200, formPage(base, key, model, null,
                             result.length > 1 ? result[1] : "获取失败", ""));
                 }
                 return;
             }
             if (model.isEmpty()) {
-                respond(client, 200, formPage(base, maskKey(key), "",
+                respond(client, 200, formPage(base, key, "",
                         null, "先点「从云端获取模型」，再选一个。", ""));
                 return;
             }
@@ -246,12 +246,7 @@ final class SoloConfig {
         String model = prefs.getString("soloModel", "");
         boolean hasKey = prefs.getString("soloKey", "").length() > 0;
         String masked = prefs.getString("soloKey", "");
-        if (masked.contains("****")) {
-            prefs.edit().remove("soloKey").commit();
-            masked = "";
-        }
-        respond(client, 200, formPage(base, masked.isEmpty() ? "" : maskKey(masked),
-                model, null, null, ""));
+        respond(client, 200, formPage(base, masked, model, null, null, ""));
     }
 
     /** Current OpenAI-compatible endpoints, newest vendor domains. */
@@ -289,9 +284,6 @@ final class SoloConfig {
         form.append("<label>API Key</label>")
                 .append("<input name=key value=\"").append(escape(key)).append("\" placeholder=\"")
                 .append(escape(keyHint == null || keyHint.isEmpty() ? "sk-…" : keyHint)).append("\">");
-        form.append("<p class=hint>当前保存的 Key：")
-                .append(escape(key.isEmpty() ? "（还没有）" : key))
-                .append("　要更换就直接改上面的输入框。</p>");
         if (models != null && models.length > 0) {
             form.append("<label>模型（已从云端取到 ").append(models.length).append(" 个）</label>");
             form.append("<select name=model>");
