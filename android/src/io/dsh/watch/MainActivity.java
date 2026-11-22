@@ -202,8 +202,8 @@ public class MainActivity extends Activity {
     String soloModel;
     JSONArray soloMessages;
     boolean soloBusy;
-    EditText baseField;
-    EditText keyField;
+    boolean baseEdited;
+    boolean keyEdited;
     Thread soloThread;
     LinearLayout soloLog;
     ScrollView soloScroll;
@@ -242,7 +242,16 @@ public class MainActivity extends Activity {
         try {
             getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                     WindowManager.LayoutParams.FLAG_FULLSCREEN);
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            body.addView(pageRow("切回远程连接", "回到连接 DSH 的模式", new Runnable() {
+            public void run() {
+                mode = "host";
+                saveSoloConfig();
+                history.clear();
+                showList();
+            }
+        }), fullWidth());
+
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             getWindow().setBackgroundDrawable(new ColorDrawable(C_BG));
             prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             deviceId = prefs.getString("deviceId", null);
@@ -3622,6 +3631,23 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** A bare host is not an API endpoint: fill in the path the provider expects. */
+    String normalizeBase(String value) {
+        if (value == null) return "";
+        String url = value.trim();
+        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
+        String rest = url.replaceFirst("^https?://", "");
+        if (rest.contains("/")) return url;
+        if (rest.endsWith("api.deepseek.com")) return url + "/v1";
+        if (rest.endsWith("api.moonshot.cn")) return url + "/v1";
+        if (rest.endsWith("api.siliconflow.cn")) return url + "/v1";
+        if (rest.endsWith("api.openai.com")) return url + "/v1";
+        if (rest.endsWith("dashscope.aliyuncs.com")) return url + "/compatible-mode/v1";
+        if (rest.endsWith("open.bigmodel.cn")) return url + "/api/paas/v4";
+        if (rest.endsWith("ark.cn-beijing.volces.com")) return url + "/api/v3";
+        return url + "/v1";
+    }
+
     /** The phone page writes prefs directly; pick those up before any call. */
     void refreshSoloConfig() {
         soloBase = prefs.getString("soloBase", soloBase);
@@ -3671,117 +3697,6 @@ public class MainActivity extends Activity {
     }
 
     /** Base URL / API key / model, typed on the watch or filled from the QR page. */
-    void showSoloConfig(String message) {
-        LinearLayout page = secondary("独立使用");
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(0, dp(2), 0, dp(8));
-
-        TextView hint = text(message != null ? message
-                : "手表直接调模型，不经过 DSH。填一次就记住。", 9, C_MUTED, false);
-        hint.setPadding(dp(8), 0, dp(8), dp(5));
-        body.addView(hint, fullWidth());
-
-        final EditText base = edit(soloBase());
-        baseField = base;
-        base.setHint("https://api.deepseek.com/v1");
-        body.addView(field("Base URL", base), fullWidth());
-
-        final EditText key = edit("");
-        keyField = key;
-        key.setHint(soloKey == null || soloKey.isEmpty() ? "sk-…" : "已保存 " + maskKey(soloKey));
-        key.setSingleLine(true);
-        body.addView(field("API Key", key), fullWidth());
-
-        String savedModel = soloModel == null ? "" : soloModel;
-        final TextView model = text(savedModel.isEmpty() ? "未选择" : savedModel, 10,
-                savedModel.isEmpty() ? C_MUTED : C_TEXT, false);
-        model.setSingleLine(true);
-        model.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        model.setPadding(dp(2), dp(2), dp(2), dp(2));
-        LinearLayout modelBox = new LinearLayout(this);
-        modelBox.setOrientation(LinearLayout.VERTICAL);
-        modelBox.setPadding(dp(10), dp(4), dp(10), dp(5));
-        modelBox.setBackground(bg(C_CARD, 12));
-        modelBox.addView(text("模型", 8, C_MUTED, false), fullWidth());
-        LinearLayout modelRow = row();
-        modelRow.setGravity(Gravity.CENTER_VERTICAL);
-        modelRow.addView(model, weight(1));
-        LinearLayout loadModels = new LinearLayout(this);
-        loadModels.setOrientation(LinearLayout.HORIZONTAL);
-        loadModels.setGravity(Gravity.CENTER);
-        loadModels.setBackground(bg(C_ACCENT, 10));
-        Glyph cloud = new Glyph(this, Glyph.CLOUD);
-        loadModels.addView(cloud, lp(dp(18), dp(18), 0, 0, 3, 0));
-        TextView loadLabel = text("获取", 8, C_ON_ACCENT, true);
-        loadModels.addView(loadLabel);
-        loadModels.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                String base = baseField.getText().toString().trim();
-                String key = keyField.getText().toString().trim();
-                if (key.isEmpty()) key = soloKey == null ? "" : soloKey;
-                if (key.isEmpty()) {
-                    toast("先填 API Key");
-                    return;
-                }
-                loadModels(base, key, model);
-            }
-        });
-        modelRow.addView(loadModels, lp(dp(64), dp(24), 4, 0, 0, 0));
-        modelBox.addView(modelRow, fullWidth());
-        LinearLayout modelWrap = new LinearLayout(this);
-        modelWrap.setOrientation(LinearLayout.VERTICAL);
-        modelWrap.setPadding(0, dp(1), 0, dp(3));
-        modelWrap.addView(modelBox, fullWidth());
-        body.addView(modelWrap, fullWidth());
-
-        Button save = smallButton("保存并开始", C_ACCENT);
-        save.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                soloBase = base.getText().toString().trim();
-                String typedKey = key.getText().toString().trim();
-                // An empty box means "keep what is stored", never "erase it".
-                if (!typedKey.isEmpty()) soloKey = typedKey;
-                String picked = model.getText().toString().trim();
-                if (!picked.isEmpty() && !"未选择".equals(picked)) soloModel = picked;
-                if (soloKey == null || soloKey.isEmpty()) {
-                    toast("API Key 不能为空");
-                    return;
-                }
-                // Base URL and key are always stored; only the model is required
-                // to actually start talking, so the key can be fixed even when
-                // the current one is rejected.
-                mode = "solo";
-                saveSoloConfig();
-                if (soloModel.isEmpty()) {
-                    toast("Key 已保存，点「获取」选个模型");
-                    showSoloConfig(null);
-                    return;
-                }
-                history.clear();
-                showSoloChat();
-            }
-        });
-        body.addView(save, lp(-1, dp(34), 0, dp(8), 0, 0));
-
-        // The QR only works while this process is alive and awake.
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        TextView tip = text("手机扫码填（手表保持亮屏，关屏就断了）", 8, C_MUTED, false);
-        tip.setPadding(dp(8), dp(12), dp(8), dp(4));
-        body.addView(tip, fullWidth());
-        body.addView(soloQrView(), lp(-1, dp(150), 0, 0, 0, 0));
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.addView(body, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        page.addView(scroll, weightV());
-        readingDetail = false;
-        go(page);
-    }
-
     /** Ask the API which models the key can use, then pick one. */
     void loadModels(final String base, final String key, final TextView target) {
         toast("正在获取模型…");
@@ -3790,21 +3705,20 @@ public class MainActivity extends Activity {
             public void run() {
                 final java.util.List<String> ids = new ArrayList<>();
                 String error = null;
+                HttpURLConnection conn = null;
                 try {
                     String url = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
-                    HttpURLConnection conn = (HttpURLConnection) new URL(url + "/models").openConnection();
+                    conn = (HttpURLConnection) new URL(url + "/models").openConnection();
                     conn.setConnectTimeout(12000);
                     conn.setReadTimeout(20000);
                     conn.setRequestProperty("Authorization", "Bearer " + key);
                     int code = conn.getResponseCode();
                     InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
                     String raw = soloReadAll(stream);
-                    conn.disconnect();
                     if (code >= 400) {
                         error = "HTTP " + code + " " + shorten(raw, 90);
                     } else {
-                        JSONObject root = new JSONObject(raw);
-                        JSONArray data = root.optJSONArray("data");
+                        JSONArray data = new JSONObject(raw).optJSONArray("data");
                         for (int i = 0; data != null && i < data.length(); i += 1) {
                             JSONObject item = data.optJSONObject(i);
                             String id = item == null ? null : item.optString("id", "");
@@ -3813,6 +3727,8 @@ public class MainActivity extends Activity {
                     }
                 } catch (Throwable err) {
                     error = String.valueOf(err.getMessage());
+                } finally {
+                    if (conn != null) conn.disconnect();
                 }
                 final String failed = error;
                 ui.post(new Runnable() {
@@ -3877,6 +3793,225 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    interface TextReady {
+        void onText(String value);
+    }
+
+    /** Tap-to-edit: the inline EditText never got focus on this watch. */
+    void editTextDialog(String title, String initial, String hint, final TextReady ready) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(6), dp(8), dp(6));
+        box.setBackground(bg(C_CARD_HI, 20));
+        box.addView(dialogHead(dialog, title), fullWidth());
+
+        final EditText input = edit(initial);
+        input.setHint(hint);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        input.setSingleLine(true);
+        input.setFocusableInTouchMode(true);
+        input.setShowSoftInputOnFocus(true);
+        box.addView(input, fullWidth());
+
+        Button save = smallButton("确定", C_ACCENT);
+        save.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String value = input.getText().toString().trim();
+                dialog.dismiss();
+                ready.onText(value);
+            }
+        });
+        box.addView(save, lp(-1, dp(32), 0, dp(6), 0, 0));
+
+        dialog.setContentView(box);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.96f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        showPlain(dialog);
+        input.requestFocus();
+    }
+
+    /** One labelled value that opens the edit dialog when tapped. */
+    View valueRow(String label, String value, View.OnClickListener tap) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(5), dp(10), dp(6));
+        box.setBackground(bg(C_CARD, 12));
+        box.addView(text(label, 8, C_MUTED, false), fullWidth());
+        TextView shown = text(value, 10, C_TEXT, false);
+        shown.setSingleLine(true);
+        shown.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        box.addView(shown, fullWidth());
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(0, dp(1), 0, dp(3));
+        wrap.addView(box, fullWidth());
+        wrap.setClickable(true);
+        wrap.setOnClickListener(tap);
+        return wrap;
+    }
+
+    void showSoloConfig(String message) {
+        refreshSoloConfig();
+        soloBase = normalizeBase(soloBase());
+        LinearLayout page = secondary("独立使用");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(8));
+
+        TextView hint = text(message != null ? message
+                : "手表直接调模型，不经过 DSH。填一次就记住。", 9, C_MUTED, false);
+        hint.setPadding(dp(8), 0, dp(8), dp(5));
+        body.addView(hint, fullWidth());
+
+        final TextView baseShown = text(soloBase(), 10, C_TEXT, false);
+        baseShown.setSingleLine(true);
+        baseShown.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        LinearLayout baseBox = new LinearLayout(this);
+        baseBox.setOrientation(LinearLayout.VERTICAL);
+        baseBox.setPadding(dp(10), dp(5), dp(10), dp(6));
+        baseBox.setBackground(bg(C_CARD, 12));
+        baseBox.addView(text("Base URL", 8, C_MUTED, false), fullWidth());
+        baseBox.addView(baseShown, fullWidth());
+        LinearLayout baseWrap = new LinearLayout(this);
+        baseWrap.setOrientation(LinearLayout.VERTICAL);
+        baseWrap.setPadding(0, dp(1), 0, dp(3));
+        baseWrap.addView(baseBox, fullWidth());
+        baseWrap.setClickable(true);
+        baseWrap.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                editTextDialog("Base URL", soloBase(), "https://api.deepseek.com/v1",
+                        new TextReady() {
+                            @Override
+                            public void onText(String value) {
+                                if (value.isEmpty()) return;
+                                soloBase = normalizeBase(value);
+                                baseEdited = true;
+                                baseShown.setText(soloBase);
+                            }
+                        });
+            }
+        });
+        body.addView(baseWrap, fullWidth());
+
+        LinearLayout keyWrap = (LinearLayout) valueRow(
+                "API Key", soloKey == null || soloKey.isEmpty() ? "未填写" : maskKey(soloKey),
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        editTextDialog("API Key", "", "sk-…", new TextReady() {
+                            @Override
+                            public void onText(String value) {
+                                if (value.isEmpty()) return;
+                                soloKey = value;
+                                keyEdited = true;
+                                ((TextView) ((LinearLayout) ((LinearLayout) v.getParent())
+                                        .getChildAt(0)).getChildAt(1)).setText(maskKey(soloKey));
+                            }
+                        });
+                    }
+                });
+        body.addView(keyWrap, fullWidth());
+
+        final TextView model = text(soloModel().isEmpty() ? "未选择" : soloModel(), 10,
+                soloModel().isEmpty() ? C_MUTED : C_TEXT, false);
+        model.setSingleLine(true);
+        model.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        LinearLayout modelBox = new LinearLayout(this);
+        modelBox.setOrientation(LinearLayout.VERTICAL);
+        modelBox.setPadding(dp(10), dp(5), dp(10), dp(6));
+        modelBox.setBackground(bg(C_CARD, 12));
+        modelBox.addView(text("模型", 8, C_MUTED, false), fullWidth());
+        LinearLayout modelRow = row();
+        modelRow.setGravity(Gravity.CENTER_VERTICAL);
+        modelRow.addView(model, weight(1));
+        LinearLayout loadModels = new LinearLayout(this);
+        loadModels.setOrientation(LinearLayout.HORIZONTAL);
+        loadModels.setGravity(Gravity.CENTER);
+        loadModels.setBackground(bg(C_ACCENT, 10));
+        Glyph cloud = new Glyph(this, Glyph.CLOUD);
+        loadModels.addView(cloud, lp(dp(18), dp(18), 0, 0, 3, 0));
+        loadModels.addView(text("获取", 8, C_ON_ACCENT, true));
+        loadModels.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (soloKey == null || soloKey.isEmpty()) {
+                    toast("先填 API Key");
+                    return;
+                }
+                loadModels(soloBase(), soloKey, model);
+            }
+        });
+        modelRow.addView(loadModels, lp(dp(64), dp(24), 4, 0, 0, 0));
+        modelBox.addView(modelRow, fullWidth());
+        LinearLayout modelWrap = new LinearLayout(this);
+        modelWrap.setOrientation(LinearLayout.VERTICAL);
+        modelWrap.setPadding(0, dp(1), 0, dp(3));
+        modelWrap.addView(modelBox, fullWidth());
+        body.addView(modelWrap, fullWidth());
+
+        Button save = smallButton("保存并开始", C_ACCENT);
+        save.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // A phone-page save lands in prefs while this page is open; only
+                // what the user actually edited here may override it.
+                if (!baseEdited) {
+                    String stored = prefs.getString("soloBase", "");
+                    if (stored != null && !stored.isEmpty()) soloBase = stored;
+                }
+                if (!keyEdited) {
+                    String stored = prefs.getString("soloKey", "");
+                    if (stored != null && !stored.isEmpty()) soloKey = stored;
+                }
+                soloBase = normalizeBase(soloBase);
+                String picked = model.getText().toString().trim();
+                if (!picked.isEmpty() && !"未选择".equals(picked)) soloModel = picked;
+                if (soloKey == null || soloKey.isEmpty()) {
+                    toast("API Key 不能为空");
+                    return;
+                }
+                mode = "solo";
+                saveSoloConfig();
+                if (soloModel.isEmpty()) {
+                    toast("已保存，点「获取」选个模型");
+                    showSoloConfig(null);
+                    return;
+                }
+                history.clear();
+                showSoloChat();
+            }
+        });
+        body.addView(save, lp(-1, dp(34), 0, dp(8), 0, 0));
+
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        TextView tip = text("手机扫码填（手表保持亮屏，关屏就断了）", 8, C_MUTED, false);
+        tip.setPadding(dp(8), dp(12), dp(8), dp(4));
+        body.addView(tip, fullWidth());
+        body.addView(soloQrView(), lp(-1, dp(150), 0, 0, 0, 0));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(body, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        page.addView(scroll, weightV());
+        readingDetail = false;
+        go(page);
+    }
+
     /** One labelled input row. */
     View field(String label, EditText input) {
         LinearLayout box = new LinearLayout(this);
@@ -3911,6 +4046,7 @@ public class MainActivity extends Activity {
                     public void run() {
                         toast("手机填好了，已保存");
                         refreshSoloConfig();
+                        if (showing(screenPair)) return;
                         history.clear();
                         showSoloChat();
                     }
@@ -3976,7 +4112,19 @@ public class MainActivity extends Activity {
                 showSoloConfig(null);
             }
         });
-        head.addView(config, lp(dp(52), dp(24), 0, 0, 0, 0));
+        head.addView(config, lp(dp(52), dp(24), 0, 0, 6, 0));
+        Glyph menu = new Glyph(this, Glyph.MENU);
+        menu.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showColumnPage();
+            }
+        });
+        LinearLayout tools = row();
+        tools.setGravity(Gravity.CENTER_VERTICAL);
+        tools.setBackground(bg(C_CARD, 11));
+        tools.addView(menu, lp(dp(30), dp(22), 0, 0, 0, 0));
+        head.addView(tools, lp(-2, dp(22), 0, 0, 0, 0));
         page.addView(head, fullWidth());
 
         soloStatus = text("", 8, C_MUTED, false);
