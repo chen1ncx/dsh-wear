@@ -204,6 +204,20 @@ public class MainActivity extends Activity {
     boolean soloBusy;
     boolean baseEdited;
     boolean keyEdited;
+    View configPageView;
+    int configSig;
+    final Runnable configWatch = new Runnable() {
+        @Override
+        public void run() {
+            // The phone page writes prefs directly; repaint when that happens.
+            if (configPageView == null || !showing(configPageView)) return;
+            if (soloConfigSig() != configSig) {
+                showSoloConfig(null);
+                return;
+            }
+            ui.postDelayed(this, 1200);
+        }
+    };
     Thread soloThread;
     LinearLayout soloLog;
     ScrollView soloScroll;
@@ -3844,6 +3858,13 @@ public class MainActivity extends Activity {
         return wrap;
     }
 
+    int soloConfigSig() {
+        String base = prefs.getString("soloBase", "");
+        String key = prefs.getString("soloKey", "");
+        String model = prefs.getString("soloModel", "");
+        return (base + "|" + key + "|" + model).hashCode();
+    }
+
     void showSoloConfig(String message) {
         refreshSoloConfig();
         soloBase = normalizeBase(soloBase());
@@ -3981,6 +4002,24 @@ public class MainActivity extends Activity {
             }
         });
         body.addView(save, lp(-1, dp(34), 0, dp(8), 0, 0));
+        body.addView(pageRow("清空配置", "地址、Key、模型和聊天记录都清掉", new Runnable() {
+            public void run() {
+                destructiveConfirm("清空配置？", "地址、Key、模型和聊天记录都会删掉", "清空", new Runnable() {
+                    @Override
+                    public void run() {
+                        soloBase = "";
+                        soloKey = "";
+                        soloModel = "";
+                        baseEdited = true;
+                        keyEdited = true;
+                        soloMessages = new JSONArray();
+                        saveSoloMessages();
+                        saveSoloConfig();
+                        showSoloConfig("已清空，重新填。");
+                    }
+                });
+            }
+        }), fullWidth());
         body.addView(pageRow("切回远程连接", "回到连接 DSH 的模式", new Runnable() {
             public void run() {
                 mode = "host";
