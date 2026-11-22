@@ -15,6 +15,10 @@ import android.os.Build;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -797,6 +801,83 @@ public class MainActivity extends Activity {
     }
 
     /** Horizontal pager with page snapping; vertical scrolling stays with the children. */
+    /** One-pixel rule used to split the tool capsule into three hit areas. */
+    View hairline(int height) {
+        View line = new View(this);
+        line.setBackgroundColor(C_LINE);
+        return line;
+    }
+
+    /** Tiny canvas-drawn glyphs: no icon files, no font coverage worries. */
+    class Glyph extends View {
+        static final int MENU = 0;
+        static final int GEAR = 1;
+        static final int PLUS = 2;
+        private final int kind;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean pressed;
+
+        Glyph(Context context, int kind) {
+            super(context);
+            this.kind = kind;
+            setClickable(true);
+            setFocusable(true);
+        }
+
+        @Override
+        public void setPressed(boolean value) {
+            pressed = value;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            int w = getWidth();
+            int h = getHeight();
+            float cx = w / 2f;
+            float cy = h / 2f;
+            float unit = Math.min(w, h);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(pressed ? C_ACCENT : C_TEXT);
+            if (kind == PLUS) {
+                float half = unit * 0.28f;
+                float stroke = Math.max(dp(1.4f), unit * 0.10f);
+                canvas.drawRoundRect(new RectF(cx - half, cy - stroke / 2f, cx + half, cy + stroke / 2f),
+                        stroke / 2f, stroke / 2f, paint);
+                canvas.drawRoundRect(new RectF(cx - stroke / 2f, cy - half, cx + stroke / 2f, cy + half),
+                        stroke / 2f, stroke / 2f, paint);
+                return;
+            }
+            if (kind == MENU) {
+                // three round-capped bars
+                float half = unit * 0.30f;
+                float stroke = Math.max(dp(1.4f), unit * 0.085f);
+                float gap = unit * 0.20f;
+                for (int i = -1; i <= 1; i += 1) {
+                    float y = cy + i * gap;
+                    canvas.drawRoundRect(new RectF(cx - half, y - stroke / 2f, cx + half, y + stroke / 2f),
+                            stroke / 2f, stroke / 2f, paint);
+                }
+                return;
+            }
+            // gear: a disc with eight stubby rounded teeth and a punched hole
+            float body = unit * 0.30f;
+            float toothLong = unit * 0.13f;
+            float toothWide = unit * 0.15f;
+            float hole = unit * 0.115f;
+            for (int i = 0; i < 8; i += 1) {
+                canvas.save();
+                canvas.rotate(i * 45f, cx, cy);
+                canvas.drawRoundRect(new RectF(cx - toothWide / 2f, cy - body - toothLong * 0.62f,
+                        cx + toothWide / 2f, cy - body + toothLong * 0.38f), toothWide * 0.28f, toothWide * 0.28f, paint);
+                canvas.restore();
+            }
+            canvas.drawCircle(cx, cy, body, paint);
+            paint.setColor(C_BG);
+            canvas.drawCircle(cx, cy, hole, paint);
+        }
+    }
+
     class Pager extends HorizontalScrollView {
         private float downX;
         private float downY;
@@ -1051,6 +1132,7 @@ public class MainActivity extends Activity {
 
     boolean showArchived;
     TextView listEmpty;
+    TextView statusDot;
     String pendingDelete;
     boolean needsAuth;
 
@@ -1065,33 +1147,72 @@ public class MainActivity extends Activity {
             Log.i(TAG, "buildList bg=" + Integer.toHexString(C_BG));
             screenList = page();
 
+            // Two components only: one capsule for the host, one for the tools.
+            // Everything is the same height and corner radius, so the row reads
+            // as one bar instead of five floating bits.
             LinearLayout head = row();
-            head.setPadding(dp(10), dp(6), dp(8), dp(2));
-            TextView title = text("DSH on wear", 10, C_ACCENT, true);
-            title.setSingleLine(true);
-            title.setEllipsize(TextUtils.TruncateAt.END);
-            title.setPadding(0, 0, dp(4), 0);
-            head.addView(title, weight(1));
+            // Fixed height and centre alignment: a weighted spacer in a
+            // wrap-content row measured unpredictably and ate the list.
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            head.setPadding(dp(8), 0, dp(8), 0);
+
+            LinearLayout host = row();
+            host.setGravity(Gravity.CENTER_VERTICAL);
+            host.setPadding(dp(9), 0, dp(9), 0);
+            host.setBackground(bg(C_CARD, 11));
+            host.setClickable(true);
+            host.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showDevicesDialog();
+                }
+            });
+            host.addView(text("设备", 9, C_TEXT, false));
+            statusDot = text("●", 6, C_GREEN, false);
+            statusDot.setPadding(dp(5), 0, dp(3), 0);
+            host.addView(statusDot);
             listStatus = text("", 8, C_MUTED, false);
-            head.addView(listStatus);
-            Button plus = outlinePill("＋");
-            plus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            host.addView(listStatus);
+            head.addView(host, lp(-2, dp(22), 0, 0, 0, 0));
+
+            // ＋ belongs beside the host capsule: it makes a new conversation
+            // on that host, so it reads as part of the same choice.
+            Glyph plus = new Glyph(this, Glyph.PLUS);
+            plus.setBackground(bg(C_CARD, 11));
             plus.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     createSession();
                 }
             });
-            head.addView(plus, lp(dp(26), dp(20), 6, 0, 0, 0));
-            Button devices = outlinePill("设备");
-            devices.setOnClickListener(new View.OnClickListener() {
+            head.addView(plus, lp(dp(26), dp(22), 5, 0, 0, 0));
+
+            View spacer = new View(this);
+            head.addView(spacer, weight(1));
+
+            LinearLayout tools = row();
+            tools.setGravity(Gravity.CENTER_VERTICAL);
+            tools.setBackground(bg(C_CARD, 11));
+            Glyph menu = new Glyph(this, Glyph.MENU);
+            menu.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    showDevicesDialog();
+                    toast("栏目菜单还没接上");
                 }
             });
-            head.addView(devices, lp(dp(36), dp(20), 6, 0, 2, 0));
-            screenList.addView(head, fullWidth());
+            tools.addView(menu, lp(dp(26), dp(22), 0, 0, 0, 0));
+            tools.addView(hairline(dp(12)), lp(1, dp(12), 0, 0, 0, 0));
+            Glyph gear = new Glyph(this, Glyph.GEAR);
+            gear.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    toast("设置还没接上");
+                }
+            });
+            tools.addView(gear, lp(dp(26), dp(22), 0, 0, 0, 0));
+            head.addView(tools, lp(-2, dp(22), 0, 0, 0, 0));
+            screenList.addView(head, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(32)));
 
             listView = new ListView(this);
             listView.setDivider(null);
