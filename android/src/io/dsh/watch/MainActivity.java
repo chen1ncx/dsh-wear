@@ -991,6 +991,12 @@ public class MainActivity extends Activity {
             version = "?";
         }
         LinearLayout page = secondary("关于");
+        TextView name = text("DSH on wear", 14, C_ACCENT, true);
+        name.setPadding(dp(8), dp(6), dp(8), 0);
+        page.addView(name, fullWidth());
+        TextView ver = text("版本 " + version, 9, C_MUTED, false);
+        ver.setPadding(dp(8), dp(1), dp(8), 0);
+        page.addView(ver, fullWidth());
         TextView dev = text("开发者：", 9, C_MUTED, false);
         dev.setPadding(dp(8), dp(10), dp(8), 0);
         page.addView(dev, fullWidth());
@@ -1000,14 +1006,8 @@ public class MainActivity extends Activity {
         TextView thanks = text("@DeepSeek Harness", 8, C_MUTED, false);
         thanks.setPadding(dp(8), dp(3), dp(8), 0);
         page.addView(thanks, fullWidth());
-        TextView name = text("DSH on wear", 13, C_ACCENT, true);
-        name.setPadding(dp(8), dp(10), dp(8), 0);
-        page.addView(name, fullWidth());
-        TextView ver = text("版本 " + version, 9, C_MUTED, false);
-        ver.setPadding(dp(8), dp(2), dp(8), 0);
-        page.addView(ver, fullWidth());
         TextView note = text("在手表上看 DSH 在做什么、回话、审批、换模型。", 9, C_TEXT, false);
-        note.setPadding(dp(8), dp(10), dp(8), 0);
+        note.setPadding(dp(8), dp(9), dp(8), 0);
         page.addView(note, fullWidth());
         TextView ai = text("界面与代码由 AI 生成", 8, C_MUTED, false);
         ai.setPadding(dp(8), dp(6), dp(8), 0);
