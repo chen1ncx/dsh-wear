@@ -1119,12 +1119,6 @@ public class MainActivity extends Activity {
         page.addView(pageRow("主题色", "八套配色，点了立刻生效", new Runnable() {
             public void run() { showThemePage(); }
         }), fullWidth());
-        readingDetail = false;
-        go(page);
-    }
-
-    void showSettingsPage() {
-        LinearLayout page = secondary("设置");
         page.addView(pageRow("退出应用", "手表上的 DSH 会关掉", new Runnable() {
             public void run() { confirmQuit(); }
         }), fullWidth());
@@ -1523,16 +1517,8 @@ public class MainActivity extends Activity {
                     showColumnPage();
                 }
             });
-            tools.addView(menu, lp(dp(26), dp(22), 0, 0, 0, 0));
-            tools.addView(hairline(dp(12)), lp(1, dp(12), 0, 0, 0, 0));
-            Glyph gear = new Glyph(this, Glyph.GEAR);
-            gear.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    showSettingsPage();
-                }
-            });
-            tools.addView(gear, lp(dp(26), dp(22), 0, 0, 0, 0));
+            // One button for everything: 设置 lives inside 更多 now.
+            tools.addView(menu, lp(dp(30), dp(22), 0, 0, 0, 0));
             head.addView(tools, lp(-2, dp(22), 0, 0, 0, 0));
             screenList.addView(head, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(32)));
