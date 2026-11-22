@@ -161,7 +161,7 @@ final class SoloConfig {
                 prefs.edit()
                         .putString("soloBase", base)
                         .putString("soloKey", key)
-                        .putString("soloModel", model.isEmpty() ? "deepseek-chat" : model)
+                        .putString("soloModel", model)
                         .putString("mode", "solo")
                         .apply();
                 Listener target = listener;
@@ -175,7 +175,7 @@ final class SoloConfig {
 
         SharedPreferences prefs = context.getSharedPreferences("dshwatch", Context.MODE_PRIVATE);
         String base = prefs.getString("soloBase", "https://api.deepseek.com");
-        String model = prefs.getString("soloModel", "deepseek-chat");
+        String model = prefs.getString("soloModel", "");
         boolean hasKey = prefs.getString("soloKey", "").length() > 0;
         String form = "<form method=post action=/save>"
                 + "<label>Base URL</label>"
@@ -183,7 +183,7 @@ final class SoloConfig {
                 + "<label>API Key</label>"
                 + "<input name=key value=\"\" placeholder=\"" + (hasKey ? "已保存，重新填会覆盖" : "sk-…") + "\">"
                 + "<label>模型</label>"
-                + "<input name=model value=\"" + escape(model) + "\" placeholder=\"deepseek-chat\">"
+                + "<input name=model value=\"" + escape(model) + "\" placeholder=\"模型名，例如 deepseek-chat\">"
                 + "<button>保存到手表</button></form>"
                 + "<p class=hint>填完点保存，手表会自动填入并开始用。</p>";
         respond(client, 200, page("配置 DSH on wear", form));

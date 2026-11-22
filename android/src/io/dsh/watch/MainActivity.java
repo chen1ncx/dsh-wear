@@ -3596,14 +3596,14 @@ public class MainActivity extends Activity {
     }
 
     String soloModel() {
-        return soloModel == null || soloModel.isEmpty() ? "deepseek-chat" : soloModel;
+        return soloModel == null ? "" : soloModel;
     }
 
     void loadSolo() {
         mode = prefs.getString("mode", "host");
         soloBase = prefs.getString("soloBase", "");
         soloKey = prefs.getString("soloKey", "");
-        soloModel = prefs.getString("soloModel", "deepseek-chat");
+        soloModel = prefs.getString("soloModel", "");
         soloMessages = null;
         try {
             soloMessages = new JSONArray(prefs.getString("soloMessages", "[]"));
@@ -3674,7 +3674,9 @@ public class MainActivity extends Activity {
         key.setSingleLine(true);
         body.addView(field("API Key", key), fullWidth());
 
-        final TextView model = text(soloModel(), 10, C_TEXT, false);
+        String savedModel = soloModel == null ? "" : soloModel;
+        final TextView model = text(savedModel.isEmpty() ? "未选择" : savedModel, 10,
+                savedModel.isEmpty() ? C_MUTED : C_TEXT, false);
         model.setSingleLine(true);
         model.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         model.setPadding(dp(2), dp(2), dp(2), dp(2));
@@ -3691,8 +3693,8 @@ public class MainActivity extends Activity {
         loadModels.setGravity(Gravity.CENTER);
         loadModels.setBackground(bg(C_ACCENT, 10));
         Glyph cloud = new Glyph(this, Glyph.CLOUD);
-        loadModels.addView(cloud, lp(dp(14), dp(14), 0, 0, 3, 0));
-        TextView loadLabel = text("获取", 9, C_ON_ACCENT, true);
+        loadModels.addView(cloud, lp(dp(18), dp(18), 0, 0, 3, 0));
+        TextView loadLabel = text("获取", 8, C_ON_ACCENT, true);
         loadModels.addView(loadLabel);
         loadModels.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -3706,7 +3708,7 @@ public class MainActivity extends Activity {
                 loadModels(base, key, model);
             }
         });
-        modelRow.addView(loadModels, lp(dp(74), dp(26), 4, 0, 0, 0));
+        modelRow.addView(loadModels, lp(dp(64), dp(24), 4, 0, 0, 0));
         modelBox.addView(modelRow, fullWidth());
         LinearLayout modelWrap = new LinearLayout(this);
         modelWrap.setOrientation(LinearLayout.VERTICAL);
@@ -3721,9 +3723,12 @@ public class MainActivity extends Activity {
                 soloBase = base.getText().toString().trim();
                 soloKey = key.getText().toString().trim();
                 soloModel = model.getText().toString().trim();
-                if (soloModel.isEmpty()) soloModel = "deepseek-chat";
                 if (soloKey.isEmpty()) {
                     toast("API Key 不能为空");
+                    return;
+                }
+                if (soloModel.isEmpty() || "未选择".equals(soloModel)) {
+                    toast("先点右边获取模型");
                     return;
                 }
                 mode = "solo";
@@ -3813,6 +3818,7 @@ public class MainActivity extends Activity {
                                 @Override
                                 public void onClick(View v) {
                                     target.setText(choice);
+                                    target.setTextColor(C_TEXT);
                                     dialog.dismiss();
                                 }
                             });
@@ -3991,7 +3997,8 @@ public class MainActivity extends Activity {
         if (soloLog == null) return;
         soloLog.removeAllViews();
         if (soloStatus != null) {
-            soloStatus.setText(soloModel() + " · " + soloHostLabel(soloBase()));
+            soloStatus.setText((soloModel().isEmpty() ? "未选模型" : soloModel())
+                    + " · " + soloHostLabel(soloBase()));
         }
         int count = soloMessages == null ? 0 : soloMessages.length();
         if (count == 0) {
@@ -4117,6 +4124,10 @@ public class MainActivity extends Activity {
         String error = null;
         String answer = "";
         HttpURLConnection conn = null;
+        if (soloModel().isEmpty()) {
+            finishSolo("还没选模型。回设置里点「获取」，选一个。");
+            return;
+        }
         try {
             JSONArray sent = new JSONArray();
             for (int i = 0; i < soloMessages.length(); i += 1) {
@@ -4186,6 +4197,24 @@ public class MainActivity extends Activity {
                     } else if (tail != null) {
                         tail.put("content", reply);
                     }
+                    saveSoloMessages();
+                } catch (Exception ignored) {
+                }
+                renderSolo();
+            }
+        });
+    }
+
+    /** Put a failure into the last bubble without touching the API. */
+    void finishSolo(final String message) {
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                soloBusy = false;
+                int last = soloMessages.length() - 1;
+                JSONObject tail = last >= 0 ? soloMessages.optJSONObject(last) : null;
+                try {
+                    if (tail != null) tail.put("content", "出错了：" + message);
                     saveSoloMessages();
                 } catch (Exception ignored) {
                 }
