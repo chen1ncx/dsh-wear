@@ -793,7 +793,7 @@ public class MainActivity extends Activity {
 
     void updateIndicator(int page) {
         if (indicator == null) return;
-        boolean reading = readingDetail;
+        boolean reading = readingDetail || guideActive;
         indicator.setVisibility(reading ? View.GONE : View.VISIBLE);
         if (detailActions != null) {
             detailActions.setPadding(dp(6), dp(2), dp(6), reading ? dp(6) : dp(18));
@@ -915,6 +915,8 @@ public class MainActivity extends Activity {
             // A finger that landed on a conversation row belongs to that row:
             // sideways there means "reveal 归档 / 删除", not "turn the page".
             if (armedRow != null) return false;
+            // The guide is a one-way door: read to the end, then tap 确认.
+            if (guideActive) return false;
             if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 downX = ev.getX();
                 downY = ev.getY();
@@ -1013,8 +1015,120 @@ public class MainActivity extends Activity {
     }
 
     void showPair(String message) {
-        buildPairPage(message);
+        if (!prefs.getBoolean("guideDone", false)) {
+            buildGuidePage();
+        } else {
+            buildPairPage(message);
+        }
         if (pager != null) pager.go(PAGE_PAIR);
+    }
+
+    /** First run: what to install on the host, with a copyable command block. */
+    void buildGuidePage() {
+        guideActive = true;
+        refreshIndicatorSoon();
+        if (screenPair == null) {
+            screenPair = page();
+            pairScroll = new ScrollView(this);
+            pairContent = new LinearLayout(this);
+            pairContent.setOrientation(LinearLayout.VERTICAL);
+            pairScroll.setFillViewport(true);
+            pairScroll.addView(pairContent, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            screenPair.addView(pairScroll, weightV());
+        }
+        if (pagePair.getChildCount() == 0) {
+            pagePair.addView(screenPair, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        pairContent.removeAllViews();
+
+        LinearLayout head = row();
+        head.setPadding(dp(10), dp(8), dp(10), dp(2));
+        head.addView(text("第一次使用", 13, C_ACCENT, true), weight(1));
+        pairContent.addView(head, fullWidth());
+
+        pairContent.addView(guideLine("1", "在要连的那台电脑或手机上装插件（命令整段复制）"));
+        pairContent.addView(guideCode("cd /tmp && rm -rf dsh-wear && git clone --depth 1 https://github.com/chen1ncx/dsh-wear.git dsh-wear\n"
+                + "P=$(readlink -f ~/.dsh/profiles/web/node_modules/dsh-watch-bridge)\n"
+                + "[ -d \"$P\" ] || P=~/dsh-watch-bridge\n"
+                + "cp -f dsh-wear/lib/index.js \"$P/lib/index.js\"\n"
+                + "cp -f dsh-wear/package.json \"$P/package.json\""));
+
+        pairContent.addView(guideLine("2", "重启那台机器上的 DSH，插件就生效了"));
+        pairContent.addView(guideCode("curl -s http://127.0.0.1:8787/api/hello"));
+        pairContent.addView(guideLine("3", "在 DSH 里让我给你一个配对码（10 分钟内有效）"));
+        pairContent.addView(guideLine("4", "把地址和配对码填到下一页，点「连接」"));
+
+        TextView tip = text("地址形如 http://192.168.1.5:8787，手机和手表要在同一个 Wi-Fi。",
+                9, C_MUTED, false);
+        tip.setPadding(dp(10), dp(4), dp(10), dp(8));
+        pairContent.addView(tip, fullWidth());
+
+        Button ok = roundKey("确认", C_ACCENT);
+        ok.setTextColor(C_ON_ACCENT);
+        ok.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        ok.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs.edit().putBoolean("guideDone", true).apply();
+                guideActive = false;
+                buildPairPage(null);
+                refreshIndicatorSoon();
+            }
+        });
+        LinearLayout okRow = row();
+        okRow.setPadding(dp(10), dp(4), dp(10), dp(10));
+        okRow.addView(ok, weightH(30));
+        pairContent.addView(okRow, fullWidth());
+    }
+
+    /** "1" style step caption. */
+    View guideLine(String number, String body) {
+        LinearLayout line = row();
+        line.setPadding(dp(10), dp(6), dp(10), 0);
+        TextView badge = text(number, 9, C_ON_ACCENT, true);
+        badge.setGravity(Gravity.CENTER);
+        badge.setBackground(bg(C_ACCENT, 8));
+        line.addView(badge, lp(dp(16), dp(16), 0, 0, 7, 0));
+        TextView label = text(body, 9, C_TEXT, false);
+        line.addView(label, weight(1));
+        return line;
+    }
+
+    /** Copyable command block: a button beats long-press on a 1-inch screen. */
+    View guideCode(final String command) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(6), dp(8), dp(6));
+        box.setBackground(bg(C_CARD, 12));
+
+        TextView code = text(command, 8, C_MUTED, false);
+        code.setTypeface(Typeface.MONOSPACE);
+        code.setTextIsSelectable(true);
+        box.addView(code, fullWidth());
+
+        Button copy = outlinePill("复制命令");
+        copy.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+        copy.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                android.content.ClipboardManager clipboard =
+                        (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("dsh", command));
+                toast("复制好了");
+            }
+        });
+        LinearLayout copyRow = row();
+        copyRow.setGravity(Gravity.RIGHT);
+        copyRow.addView(copy, lp(-2, dp(24), 0, 4, 0, 0));
+        box.addView(copyRow, fullWidth());
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(10), dp(4), dp(10), dp(2));
+        wrap.addView(box, fullWidth());
+        return wrap;
     }
 
     void buildPairPage(String message) {
@@ -1149,6 +1263,8 @@ public class MainActivity extends Activity {
     TextView listEmpty;
     TextView statusDot;
     SwipeRow openSwipe;
+    /** First-run guide owns the screen: no paging, no pill, only 确认 moves on. */
+    boolean guideActive;
     /** Row that received the current finger-down; the pager stands back for it. */
     SwipeRow armedRow;
     String pendingDelete;
