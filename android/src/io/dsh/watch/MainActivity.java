@@ -3601,7 +3601,8 @@ public class MainActivity extends Activity {
     // ============================================================== 独立模式
 
     String soloBase() {
-        return soloBase != null ? soloBase : "https://api.deepseek.com";
+        // Same shape as the phone app's OpenAI-compatible endpoint.
+        return soloBase == null || soloBase.isEmpty() ? "https://api.deepseek.com/v1" : soloBase;
     }
 
     String soloModel() {
@@ -3676,12 +3677,12 @@ public class MainActivity extends Activity {
 
         final EditText base = edit(soloBase());
         baseField = base;
-        base.setHint("https://api.deepseek.com");
+        base.setHint("https://api.deepseek.com/v1");
         body.addView(field("Base URL", base), fullWidth());
 
-        final EditText key = edit(soloKey == null ? "" : soloKey);
+        final EditText key = edit("");
         keyField = key;
-        key.setHint("sk-…");
+        key.setHint(soloKey == null || soloKey.isEmpty() ? "sk-…" : "已保存 " + maskKey(soloKey));
         key.setSingleLine(true);
         body.addView(field("API Key", key), fullWidth());
 
@@ -3712,6 +3713,7 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 String base = baseField.getText().toString().trim();
                 String key = keyField.getText().toString().trim();
+                if (key.isEmpty()) key = soloKey == null ? "" : soloKey;
                 if (key.isEmpty()) {
                     toast("先填 API Key");
                     return;
@@ -3732,9 +3734,11 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 soloBase = base.getText().toString().trim();
-                soloKey = key.getText().toString().trim();
+                String typedKey = key.getText().toString().trim();
+                // An empty box means "keep what is stored", never "erase it".
+                if (!typedKey.isEmpty()) soloKey = typedKey;
                 soloModel = model.getText().toString().trim();
-                if (soloKey.isEmpty()) {
+                if (soloKey == null || soloKey.isEmpty()) {
                     toast("API Key 不能为空");
                     return;
                 }
@@ -4048,6 +4052,12 @@ public class MainActivity extends Activity {
                 if (scroll != null) scroll.fullScroll(View.FOCUS_DOWN);
             }
         });
+    }
+
+    /** sk-abcdef…wxyz: enough to recognise, not enough to leak. */
+    String maskKey(String value) {
+        if (value == null || value.length() <= 8) return "sk-****";
+        return value.substring(0, 3) + "****" + value.substring(value.length() - 4);
     }
 
     String soloHostLabel(String url) {

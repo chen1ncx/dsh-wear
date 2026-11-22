@@ -186,7 +186,7 @@ final class SoloConfig {
         if ("POST".equals(method) && path.startsWith("/save")) {
             SharedPreferences prefs = context.getSharedPreferences("dshwatch", Context.MODE_PRIVATE);
             String base = "";
-            String key = "";
+            String key = prefs.getString("soloKey", "");
             String model = "";
             boolean fetch = false;
             for (String pair : body.split("&")) {
@@ -195,23 +195,26 @@ final class SoloConfig {
                 String name = pair.substring(0, eq);
                 String val = URLDecoder.decode(pair.substring(eq + 1), "UTF-8").trim();
                 if ("base".equals(name)) base = val;
-                else if ("key".equals(name)) key = val;
+                else if ("key".equals(name) && !val.isEmpty()) key = val;
                 else if ("model".equals(name)) model = val;
                 else if ("fetch".equals(name)) fetch = true;
             }
             if (fetch && !base.isEmpty() && !key.isEmpty()) {
                 String[] result = fetchModels(base, key);
                 if (result.length > 0 && result[0] != null) {
-                    respond(client, 200, formPage(base, key, model, result, null));
+                    respond(client, 200, formPage(base, "", model, result, null,
+                            "已保存 " + maskKey(key)));
                 } else {
-                    respond(client, 200, formPage(base, key, model, null,
-                            result.length > 1 ? result[1] : "获取失败"));
+                    respond(client, 200, formPage(base, "", model, null,
+                            result.length > 1 ? result[1] : "获取失败",
+                            "已保存 " + maskKey(key)));
                 }
                 return;
             }
             if (!base.isEmpty() && !key.isEmpty() && model.isEmpty()) {
-                respond(client, 200, formPage(base, key, "",
-                        null, "模型要从云端获取后再选，不能留空。"));
+                respond(client, 200, formPage(base, "", "",
+                        null, "模型要从云端获取后再选，不能留空。",
+                        "已保存 " + maskKey(key)));
                 return;
             }
             if (!base.isEmpty() && !key.isEmpty()) {
@@ -231,21 +234,25 @@ final class SoloConfig {
         }
 
         SharedPreferences prefs = context.getSharedPreferences("dshwatch", Context.MODE_PRIVATE);
-        String base = prefs.getString("soloBase", "https://api.deepseek.com");
+        String base = prefs.getString("soloBase", "");
+        if (base.isEmpty()) base = "https://api.deepseek.com/v1";
         String model = prefs.getString("soloModel", "");
         boolean hasKey = prefs.getString("soloKey", "").length() > 0;
-        respond(client, 200, formPage(base, hasKey ? "" : "", model, null, null));
+        String masked = prefs.getString("soloKey", "");
+        respond(client, 200, formPage(base, "", model, null, null,
+                masked.isEmpty() ? "" : "已保存 " + maskKey(masked)));
     }
 
     /** The whole config page: base, key, then either a text field or a model list. */
     private static String formPage(String base, String key, String model,
-                                   String[] models, String error) {
+                                   String[] models, String error, String keyHint) {
         StringBuilder form = new StringBuilder();
         form.append("<form method=post action=/save>");
         form.append("<label>Base URL</label>")
-                .append("<input name=base value=\"").append(escape(base)).append("\" placeholder=\"https://api.deepseek.com\">");
+                .append("<input name=base value=\"").append(escape(base)).append("\" placeholder=\"https://api.deepseek.com/v1\">");
         form.append("<label>API Key</label>")
-                .append("<input name=key value=\"").append(escape(key)).append("\" placeholder=\"sk-…\">");
+                .append("<input name=key value=\"").append(escape(key)).append("\" placeholder=\"")
+                .append(escape(keyHint == null || keyHint.isEmpty() ? "sk-…" : keyHint)).append("\">");
         if (models != null && models.length > 0) {
             form.append("<label>模型（已从云端取到 ").append(models.length).append(" 个）</label>");
             form.append("<select name=model>");
@@ -304,6 +311,12 @@ final class SoloConfig {
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    /** sk-abcdef…wxyz: recognisable, not reusable. */
+    private static String maskKey(String value) {
+        if (value == null || value.length() <= 8) return "sk-****";
+        return value.substring(0, 3) + "****" + value.substring(value.length() - 4);
     }
 
     private static String escape(String value) {
