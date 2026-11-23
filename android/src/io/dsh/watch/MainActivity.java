@@ -195,33 +195,6 @@ public class MainActivity extends Activity {
 
     FrameLayout root;
     LinearLayout screenPair;
-    /** "host" = talk to a DSH host; "solo" = the watch talks to the API itself. */
-    String mode;
-    String soloBase;
-    String soloKey;
-    String soloModel;
-    JSONArray soloMessages;
-    boolean soloBusy;
-    boolean baseEdited;
-    boolean keyEdited;
-    View configPageView;
-    int configSig;
-    final Runnable configWatch = new Runnable() {
-        @Override
-        public void run() {
-            // The phone page writes prefs directly; repaint when that happens.
-            if (configPageView == null || !showing(configPageView)) return;
-            if (soloConfigSig() != configSig) {
-                showSoloConfig(null);
-                return;
-            }
-            ui.postDelayed(this, 1200);
-        }
-    };
-    Thread soloThread;
-    LinearLayout soloLog;
-    ScrollView soloScroll;
-    TextView soloStatus;
 
     LinearLayout screenList;
     LinearLayout screenDetail;
@@ -1333,7 +1306,7 @@ public class MainActivity extends Activity {
     void showList() {
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if ("solo".equals(mode)) {
-            showSoloChat();
+            showSoloSessions();
             return;
         }
         selectedId = null;
@@ -3614,6 +3587,61 @@ public class MainActivity extends Activity {
 
     // ============================================================== 独立模式
 
+    String mode;
+    String soloBase;
+    String soloKey;
+    String soloModel;
+    boolean soloBusy;
+    Thread soloThread;
+    volatile boolean soloCancelled;
+    LinearLayout soloLog;
+    ScrollView soloScroll;
+    TextView soloStatus;
+    boolean baseEdited;
+    boolean keyEdited;
+    String soloOpen;
+    View configPageView;
+    int configSig;
+    final Runnable configWatch = new Runnable() {
+        @Override
+        public void run() {
+            if (configPageView == null || !showing(configPageView)) return;
+            if (soloConfigSig() != configSig) {
+                showSoloConfig(null);
+                return;
+            }
+            ui.postDelayed(this, 1200);
+        }
+    };
+
+    int soloConfigSig() {
+        String base = prefs.getString("soloBase", "");
+        String key = prefs.getString("soloKey", "");
+        String model = prefs.getString("soloModel", "");
+        return (base + "|" + key + "|" + model).hashCode();
+    }
+
+    void loadSolo() {
+        mode = prefs.getString("mode", "host");
+        refreshSoloConfig();
+        soloOpen = prefs.getString("soloOpen", "");
+    }
+
+    void refreshSoloConfig() {
+        soloBase = prefs.getString("soloBase", "");
+        soloKey = prefs.getString("soloKey", "");
+        soloModel = prefs.getString("soloModel", "");
+    }
+
+    void saveSoloConfig() {
+        prefs.edit()
+                .putString("mode", mode)
+                .putString("soloBase", soloBase == null ? "" : soloBase)
+                .putString("soloKey", soloKey == null ? "" : soloKey)
+                .putString("soloModel", soloModel == null ? "" : soloModel)
+                .apply();
+    }
+
     String soloBase() {
         return soloBase == null ? "" : soloBase;
     }
@@ -3622,20 +3650,6 @@ public class MainActivity extends Activity {
         return soloModel == null ? "" : soloModel;
     }
 
-    void loadSolo() {
-        mode = prefs.getString("mode", "host");
-        soloBase = prefs.getString("soloBase", "");
-        soloKey = prefs.getString("soloKey", "");
-        soloModel = prefs.getString("soloModel", "");
-        soloMessages = null;
-        try {
-            soloMessages = new JSONArray(prefs.getString("soloMessages", "[]"));
-        } catch (Exception bad) {
-            soloMessages = new JSONArray();
-        }
-    }
-
-    /** Only trims: the URL is whatever was typed, never guessed. */
     String normalizeBase(String value) {
         if (value == null) return "";
         String url = value.trim();
@@ -3643,57 +3657,800 @@ public class MainActivity extends Activity {
         return url;
     }
 
-    /** The phone page writes prefs directly; pick those up before any call. */
-    void refreshSoloConfig() {
-        soloBase = prefs.getString("soloBase", soloBase);
-        soloKey = prefs.getString("soloKey", soloKey);
-        soloModel = prefs.getString("soloModel", soloModel);
-        // A masked placeholder must never be treated as a real key.
-
+    String soloHostLabel(String url) {
+        if (url == null) return "";
+        String clean = url.replace("https://", "").replace("http://", "");
+        if (clean.endsWith("/")) clean = clean.substring(0, clean.length() - 1);
+        return clean;
     }
 
-    void saveSoloConfig() {
-        prefs.edit()
-                .putString("mode", mode)
-                .putString("soloBase", soloBase == null ? "" : soloBase)
-                .putString("soloKey", soloKey == null ? "" : soloKey)
-                .putString("soloModel", soloModel())
-                .apply();
-    }
+    // ------------------------------------------------------------- sessions
 
-    void saveSoloMessages() {
-        prefs.edit().putString("soloMessages",
-                soloMessages == null ? "[]" : soloMessages.toString()).apply();
-    }
-
-    void showModePage() {
+    /** 独立使用的首页：本地会话列表。 */
+    void showSoloSessions() {
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        LinearLayout page = secondary("切换模式");
-        addModeRow(page, "host", "连接 DSH", "看电脑上 DSH 在做什么，并回话");
-        addModeRow(page, "solo", "独立使用", "不连 DSH，手表直接调模型");
+        refreshSoloConfig();
+        LinearLayout page = secondary("独立使用");
+
+        LinearLayout tools = row();
+        tools.setGravity(Gravity.CENTER_VERTICAL);
+        tools.setPadding(dp(8), dp(2), dp(8), dp(4));
+        TextView note = text(soloModel().isEmpty() ? "还没有配置模型" : soloModel()
+                + " · " + soloHostLabel(soloBase()), 8, C_MUTED, false);
+        note.setSingleLine(true);
+        note.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        tools.addView(note, weight(1));
+        Button config = smallButton("设置", C_CARD);
+        config.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showSoloConfig(null);
+            }
+        });
+        tools.addView(config, lp(dp(48), dp(24), 0, 0, 0, 0));
+        page.addView(tools, fullWidth());
+
+        JSONArray list = SoloStore.sessions(prefs);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(6));
+
+        body.addView(pageRow("＋ 新对话", "开一条新的聊天", new Runnable() {
+            public void run() {
+                if (soloKey == null || soloKey.isEmpty() || soloModel().isEmpty()) {
+                    showSoloConfig("先把地址、Key 和模型配好");
+                    return;
+                }
+                JSONObject created = SoloStore.newSession(prefs, "新对话");
+                soloOpen = created.optString("id");
+                showSoloChat();
+            }
+        }), fullWidth());
+
+        for (int i = 0; i < list.length(); i += 1) {
+            final JSONObject item = list.optJSONObject(i);
+            if (item == null) continue;
+            final String id = item.optString("id");
+            String title = SoloStore.titleOf(item);
+            JSONArray messages = item.optJSONArray("messages");
+            int count = messages == null ? 0 : messages.length();
+            View row = pageRow(title, count + " 条消息", new Runnable() {
+                public void run() {
+                    soloOpen = id;
+                    prefs.edit().putString("soloOpen", id).apply();
+                    showSoloChat();
+                }
+            });
+            row.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    destructiveConfirm("删掉这条对话？", "只删本地记录", "删除", new Runnable() {
+                        @Override
+                        public void run() {
+                            SoloStore.removeSession(prefs, id);
+                            showSoloSessions();
+                        }
+                    });
+                    return true;
+                }
+            });
+            body.addView(row, fullWidth());
+        }
+
+        if (list.length() == 0) {
+            TextView empty = text("还没有对话。点上面的＋新对话开始。", 9, C_MUTED, false);
+            empty.setPadding(dp(10), dp(6), dp(10), 0);
+            body.addView(empty, fullWidth());
+        }
+
+        scroll.addView(body, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        page.addView(scroll, weightV());
         readingDetail = false;
         go(page);
     }
 
-    void addModeRow(LinearLayout page, final String value, String label, String hint) {
-        boolean active = value.equals(mode);
-        View row = pageRow((active ? "● " : "○ ") + label, hint, new Runnable() {
-            public void run() {
-                if ("solo".equals(value) && (soloKey == null || soloKey.isEmpty())) {
-                    showSoloConfig(null);
-                    return;
-                }
-                mode = value;
-                selectedId = null;
-                saveSoloConfig();
-                history.clear();
-                if ("solo".equals(mode)) showSoloChat(); else showList();
-            }
-        });
-        page.addView(row, fullWidth());
+    JSONObject openSession() {
+        JSONObject item = SoloStore.session(prefs, soloOpen);
+        if (item == null) {
+            JSONArray list = SoloStore.sessions(prefs);
+            item = list.length() > 0 ? list.optJSONObject(0) : null;
+            soloOpen = item == null ? "" : item.optString("id");
+        }
+        return item;
     }
 
-    /** Base URL / API key / model, typed on the watch or filled from the QR page. */
+    /** 一条对话：消息、停止、说一句。 */
+    void showSoloChat() {
+        refreshSoloConfig();
+        final JSONObject session = openSession();
+        if (session == null) {
+            showSoloSessions();
+            return;
+        }
+
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setBackgroundColor(C_BG);
+
+        LinearLayout head = row();
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(8), dp(6), dp(8), dp(2));
+        TextView back = text("‹", 20, C_BLUE, true);
+        back.setPadding(dp(6), 0, dp(6), 0);
+        back.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showSoloSessions();
+            }
+        });
+        head.addView(back, lp(-2, -2, 0, 0, 0, 0));
+        TextView title = text(SoloStore.titleOf(session), 11, C_ACCENT, true);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        head.addView(title, weight(1));
+        Glyph menu = new Glyph(this, Glyph.MENU);
+        menu.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showColumnPage();
+            }
+        });
+        LinearLayout tools = row();
+        tools.setGravity(Gravity.CENTER_VERTICAL);
+        tools.setBackground(bg(C_CARD, 11));
+        tools.addView(menu, lp(dp(30), dp(22), 0, 0, 0, 0));
+        head.addView(tools, lp(-2, dp(22), 0, 0, 0, 0));
+        page.addView(head, fullWidth());
+
+        soloStatus = text((soloModel().isEmpty() ? "未选模型" : soloModel())
+                + " · " + soloHostLabel(soloBase()), 8, C_MUTED, false);
+        soloStatus.setPadding(dp(10), 0, dp(10), dp(2));
+        page.addView(soloStatus, fullWidth());
+
+        soloLog = new LinearLayout(this);
+        soloLog.setOrientation(LinearLayout.VERTICAL);
+        soloLog.setPadding(dp(8), dp(2), dp(8), dp(4));
+        soloScroll = new ScrollView(this);
+        soloScroll.setVerticalScrollBarEnabled(false);
+        soloScroll.addView(soloLog, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        page.addView(soloScroll, weightV());
+
+        LinearLayout actions = row();
+        actions.setPadding(dp(6), dp(2), dp(6), dp(6));
+        Button stop = smallButton("停止", C_RED);
+        stop.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!soloBusy) {
+                    toast("现在没有在生成");
+                    return;
+                }
+                soloCancelled = true;
+                toast("停下了");
+            }
+        });
+        actions.addView(stop, weightH(32));
+        Button say = smallButton("说一句", C_BLUE);
+        say.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showSoloSay();
+            }
+        });
+        actions.addView(say, weightH(32));
+        page.addView(actions, fullWidth());
+
+        readingDetail = false;
+        showScreen(page);
+        renderSolo();
+    }
+
+    void renderSolo() {
+        if (soloLog == null) return;
+        soloLog.removeAllViews();
+        JSONObject session = openSession();
+        JSONArray messages = session == null ? null : session.optJSONArray("messages");
+        int count = messages == null ? 0 : messages.length();
+        if (count == 0) {
+            TextView empty = text("问点什么吧。这条链路不经过 DSH，手表直接调模型。", 9, C_MUTED, false);
+            empty.setPadding(dp(4), dp(8), dp(4), 0);
+            soloLog.addView(empty, fullWidth());
+            return;
+        }
+        for (int i = 0; i < count; i += 1) {
+            JSONObject item = messages.optJSONObject(i);
+            if (item == null) continue;
+            boolean mine = "user".equals(item.optString("role"));
+            LinearLayout bubble = new LinearLayout(this);
+            bubble.setOrientation(LinearLayout.VERTICAL);
+            bubble.setPadding(dp(9), dp(7), dp(9), dp(7));
+            bubble.setBackground(bg(mine ? C_CARD_HI : C_CARD, 12));
+            bubble.addView(text(mine ? "我" : "模型", 8, mine ? C_BLUE : C_ACCENT, true), fullWidth());
+            TextView bodyText = text(item.optString("content", ""), 10, C_TEXT, false);
+            bodyText.setTextIsSelectable(true);
+            bubble.addView(bodyText, fullWidth());
+            LinearLayout wrap = new LinearLayout(this);
+            wrap.setOrientation(LinearLayout.VERTICAL);
+            wrap.setPadding(0, dp(1), 0, dp(3));
+            wrap.addView(bubble, fullWidth());
+            soloLog.addView(wrap, fullWidth());
+        }
+        final ScrollView scroll = soloScroll;
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                if (scroll != null) scroll.fullScroll(View.FOCUS_DOWN);
+            }
+        });
+    }
+
+    void showSoloSay() {
+        if (soloBusy) {
+            toast("上一条还没回完");
+            return;
+        }
+        if (soloKey == null || soloKey.isEmpty() || soloModel().isEmpty()) {
+            showSoloConfig("先把地址、Key 和模型配好");
+            return;
+        }
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        LinearLayout island = new LinearLayout(this);
+        island.setOrientation(LinearLayout.HORIZONTAL);
+        island.setGravity(Gravity.CENTER_VERTICAL);
+        island.setPadding(dp(8), dp(5), dp(6), dp(5));
+        island.setBackground(bg(C_CARD_HI, 18));
+
+        final EditText input = edit("");
+        input.setHint("说点什么…");
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        input.setSingleLine(true);
+        input.setFocusableInTouchMode(true);
+        input.setShowSoftInputOnFocus(true);
+        input.setBackground(null);
+        island.addView(input, weight(1));
+
+        Button send = roundKey("↑", C_ACCENT);
+        send.setTextColor(C_ON_ACCENT);
+        send.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String typed = input.getText().toString().trim();
+                if (typed.isEmpty()) return;
+                dialog.dismiss();
+                sendSolo(typed);
+            }
+        });
+        island.addView(send, lp(dp(30), dp(30), 5, 0, 0, 0));
+
+        dialog.setContentView(island);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.96f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.BOTTOM;
+            params.y = dp(8);
+            window.setAttributes(params);
+        }
+        dialog.show();
+    }
+
+    void sendSolo(final String typed) {
+        final JSONObject session = openSession();
+        if (session == null) {
+            showSoloSessions();
+            return;
+        }
+        try {
+            JSONArray messages = session.optJSONArray("messages");
+            if (messages == null) {
+                messages = new JSONArray();
+                session.put("messages", messages);
+            }
+            JSONObject user = new JSONObject();
+            user.put("role", "user");
+            user.put("content", typed);
+            messages.put(user);
+            JSONObject reply = new JSONObject();
+            reply.put("role", "assistant");
+            reply.put("content", "");
+            messages.put(reply);
+            SoloStore.touchSession(prefs, session);
+            renderSolo();
+            soloBusy = true;
+            soloCancelled = false;
+            soloThread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    callSoloApi(session);
+                }
+            });
+            soloThread.start();
+        } catch (Exception err) {
+            toast("发送失败 " + err.getMessage());
+            soloBusy = false;
+        }
+    }
+
+    /** One call to /chat/completions; the reply fills the empty bubble. */
+    void callSoloApi(JSONObject session) {
+        String error = null;
+        StringBuilder answer = new StringBuilder();
+        HttpURLConnection conn = null;
+        try {
+            JSONArray messages = session.optJSONArray("messages");
+            JSONArray sent = new JSONArray();
+            for (int i = 0; messages != null && i < messages.length(); i += 1) {
+                JSONObject item = messages.optJSONObject(i);
+                if (item == null) continue;
+                String role = item.optString("role");
+                String content = item.optString("content");
+                if ("assistant".equals(role) && content.isEmpty()) continue;
+                JSONObject out = new JSONObject();
+                out.put("role", role);
+                out.put("content", content);
+                sent.put(out);
+            }
+            JSONObject body = new JSONObject();
+            body.put("model", soloModel());
+            body.put("messages", sent);
+            body.put("stream", true);
+
+            String base = soloBase();
+            if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+            conn = (HttpURLConnection) new URL(base + "/chat/completions").openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(120000);
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Authorization", "Bearer " + soloKey);
+            byte[] payload = body.toString().getBytes("UTF-8");
+            conn.setFixedLengthStreamingMode(payload.length);
+            OutputStream out = conn.getOutputStream();
+            out.write(payload);
+            out.close();
+
+            int code = conn.getResponseCode();
+            InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            if (code >= 400) {
+                error = "HTTP " + code + " " + shorten(soloReadAll(stream), 120);
+            } else {
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(stream, "UTF-8"));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (soloCancelled) break;
+                    if (!line.startsWith("data:")) continue;
+                    String chunk = line.substring(5).trim();
+                    if ("[DONE]".equals(chunk)) break;
+                    try {
+                        JSONObject event = new JSONObject(chunk);
+                        JSONArray choices = event.optJSONArray("choices");
+                        JSONObject first = choices == null ? null : choices.optJSONObject(0);
+                        JSONObject delta = first == null ? null : first.optJSONObject("delta");
+                        String piece = delta == null ? null : delta.optString("content", "");
+                        if (piece != null && !piece.isEmpty()) {
+                            answer.append(piece);
+                            paintSolo(answer.toString());
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+                reader.close();
+            }
+        } catch (Throwable err) {
+            error = String.valueOf(err.getMessage());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+
+        final String failed = error;
+        final String text = answer.toString();
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                soloBusy = false;
+                JSONArray messages = session.optJSONArray("messages");
+                int last = messages == null ? -1 : messages.length() - 1;
+                JSONObject tail = last >= 0 ? messages.optJSONObject(last) : null;
+                try {
+                    if (tail != null) {
+                        if (failed != null) tail.put("content", "出错了：" + failed);
+                        else if (!text.isEmpty()) tail.put("content", text);
+                        else tail.put("content", "（没有内容返回）");
+                    }
+                    SoloStore.touchSession(prefs, session);
+                } catch (Exception ignored) {
+                }
+                renderSolo();
+            }
+        });
+    }
+
+    /** Show the half-finished answer while it streams in. */
+    void paintSolo(final String partial) {
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                if (soloLog == null || soloLog.getChildCount() == 0) return;
+                android.view.View lastChild = soloLog.getChildAt(soloLog.getChildCount() - 1);
+                if (!(lastChild instanceof LinearLayout)) return;
+                LinearLayout wrap = (LinearLayout) lastChild;
+                if (wrap.getChildCount() == 0) return;
+                LinearLayout bubble = (LinearLayout) wrap.getChildAt(0);
+                if (bubble.getChildCount() < 2) return;
+                ((TextView) bubble.getChildAt(1)).setText(partial);
+            }
+        });
+    }
+
+    /** Put a failure into the last bubble without calling the API. */
+    void finishSolo(final String message) {
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                soloBusy = false;
+                JSONObject session = openSession();
+                JSONArray messages = session == null ? null : session.optJSONArray("messages");
+                int last = messages == null ? -1 : messages.length() - 1;
+                JSONObject tail = last >= 0 ? messages.optJSONObject(last) : null;
+                try {
+                    if (tail != null) tail.put("content", "出错了：" + message);
+                    if (session != null) SoloStore.touchSession(prefs, session);
+                } catch (Exception ignored) {
+                }
+                renderSolo();
+            }
+        });
+    }
+
+    String soloReadAll(InputStream stream) throws Exception {
+        if (stream == null) return "";
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        int n;
+        while ((n = stream.read(chunk)) > 0) buffer.write(chunk, 0, n);
+        stream.close();
+        return new String(buffer.toByteArray(), "UTF-8");
+    }
+
+    String shorten(String value, int max) {
+        if (value == null) return "";
+        String flat = value.replaceAll("[ \t\r\n]+", " ").trim();
+        return flat.length() <= max ? flat : flat.substring(0, max) + "…";
+    }
+
+    // ============================================================== 扫码填
+
+    /** QR of the phone page plus the URL under it. */
+    View soloQrView() {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        String ip = SoloConfig.localIp();
+        final String url = ip == null || ip.isEmpty() ? "" : "http://" + ip + ":8788/";
+
+        SoloConfig.start(this);
+        SoloConfig.setListener(new SoloConfig.Listener() {
+            @Override
+            public void onSaved(String base, String key, String model) {
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        refreshSoloConfig();
+                        toast("手机填好了，已保存");
+                        history.clear();
+                        showSoloSessions();
+                    }
+                });
+            }
+        });
+
+        ImageView qr = new ImageView(this);
+        qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        if (!url.isEmpty()) {
+            try {
+                boolean[][] grid = Qr.encode(url, Qr.M);
+                int quiet = 4;
+                int size = grid.length + quiet * 2;
+                int[] pixels = new int[size * size];
+                for (int y = 0; y < size; y += 1) {
+                    for (int x = 0; x < size; x += 1) {
+                        boolean dark = x >= quiet && y >= quiet
+                                && x < quiet + grid.length && y < quiet + grid.length
+                                && grid[y - quiet][x - quiet];
+                        pixels[y * size + x] = dark ? 0xff101318 : 0xffffffff;
+                    }
+                }
+                Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+                bitmap.setPixels(pixels, 0, size, 0, 0, size, size);
+                qr.setImageBitmap(Bitmap.createScaledBitmap(bitmap, dp(140), dp(140), false));
+            } catch (Throwable ignored) {
+            }
+        }
+        wrap.addView(qr, lp(dp(140), dp(140), 0, dp(4), 0, 0));
+
+        TextView caption = text(url.isEmpty() ? "没有 Wi-Fi 地址" : url, 7,
+                url.isEmpty() ? C_RED : C_MUTED, true);
+        caption.setGravity(Gravity.CENTER);
+        caption.setPadding(dp(4), 0, dp(4), 0);
+        wrap.addView(caption, fullWidth());
+        return wrap;
+    }
+
+    // ============================================================== 设置页
+
+    void showModePage() {
+        LinearLayout page = secondary("切换模式");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(6));
+
+        body.addView(pageRow("连接 DSH" + ("host".equals(mode) ? "　●" : ""),
+                "远程看会话、审批、回话", new Runnable() {
+                    public void run() {
+                        mode = "host";
+                        saveSoloConfig();
+                        history.clear();
+                        showList();
+                    }
+                }), fullWidth());
+        body.addView(pageRow("独立使用" + ("solo".equals(mode) ? "　●" : ""),
+                "手表直接调模型，不用电脑", new Runnable() {
+                    public void run() {
+                        mode = "solo";
+                        saveSoloConfig();
+                        history.clear();
+                        showSoloSessions();
+                    }
+                }), fullWidth());
+        page.addView(body, weightV());
+        readingDetail = false;
+        go(page);
+    }
+
+    interface TextReady {
+        void onText(String value);
+    }
+
+    /** Tap-to-edit: an inline EditText never took focus on this watch. */
+    void editTextDialog(String title, String initial, String hint, final TextReady ready) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        box.setBackground(bg(C_CARD_HI, 20));
+        box.addView(dialogHead(dialog, title), fullWidth());
+
+        final EditText input = edit(initial == null ? "" : initial);
+        input.setHint(hint);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        input.setSingleLine(true);
+        input.setFocusableInTouchMode(true);
+        input.setShowSoftInputOnFocus(true);
+        box.addView(input, fullWidth());
+
+        Button save = smallButton("确定", C_ACCENT);
+        save.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String value = input.getText().toString().trim();
+                dialog.dismiss();
+                ready.onText(value);
+            }
+        });
+        box.addView(save, lp(-1, dp(32), 0, dp(6), 0, 0));
+
+        dialog.setContentView(box);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.96f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        showPlain(dialog);
+    }
+
+    /** A labelled value that opens an edit dialog when tapped. */
+    View valueRow(String label, String value, final View.OnClickListener tap) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(5), dp(10), dp(6));
+        box.setBackground(bg(C_CARD, 12));
+        box.addView(text(label, 8, C_MUTED, false), fullWidth());
+        TextView shown = text(value, 9, C_TEXT, false);
+        shown.setSingleLine(true);
+        shown.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        box.addView(shown, fullWidth());
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(0, dp(1), 0, dp(3));
+        wrap.addView(box, fullWidth());
+        wrap.setClickable(true);
+        wrap.setOnClickListener(tap);
+        return wrap;
+    }
+
+    void showSoloConfig(String message) {
+        refreshSoloConfig();
+        LinearLayout page = secondary("独立使用");
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(8));
+
+        TextView hint = text(message != null ? message : "填一次就记住。Key 存在本机，不上传。",
+                9, C_MUTED, false);
+        hint.setPadding(dp(10), 0, dp(10), dp(4));
+        body.addView(hint, fullWidth());
+
+        final TextView baseShown = text(soloBase().isEmpty() ? "未填写" : soloBase(), 9,
+                soloBase().isEmpty() ? C_MUTED : C_TEXT, false);
+        baseShown.setSingleLine(true);
+        baseShown.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        LinearLayout baseBox = new LinearLayout(this);
+        baseBox.setOrientation(LinearLayout.VERTICAL);
+        baseBox.setPadding(dp(10), dp(5), dp(10), dp(6));
+        baseBox.setBackground(bg(C_CARD, 12));
+        baseBox.addView(text("Base URL", 8, C_MUTED, false), fullWidth());
+        baseBox.addView(baseShown, fullWidth());
+        LinearLayout baseWrap = new LinearLayout(this);
+        baseWrap.setOrientation(LinearLayout.VERTICAL);
+        baseWrap.setPadding(0, dp(1), 0, dp(3));
+        baseWrap.addView(baseBox, fullWidth());
+        baseWrap.setClickable(true);
+        baseWrap.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                editTextDialog("Base URL", soloBase(), "https://api.deepseek.com/v1",
+                        new TextReady() {
+                            @Override
+                            public void onText(String value) {
+                                if (value.isEmpty()) return;
+                                soloBase = normalizeBase(value);
+                                baseShown.setText(soloBase);
+                                baseShown.setTextColor(C_TEXT);
+                            }
+                        });
+            }
+        });
+        body.addView(baseWrap, fullWidth());
+
+        final TextView keyShown = text(soloKey == null || soloKey.isEmpty() ? "未填写" : soloKey, 9,
+                soloKey == null || soloKey.isEmpty() ? C_MUTED : C_TEXT, false);
+        keyShown.setSingleLine(true);
+        keyShown.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        LinearLayout keyBox = new LinearLayout(this);
+        keyBox.setOrientation(LinearLayout.VERTICAL);
+        keyBox.setPadding(dp(10), dp(5), dp(10), dp(6));
+        keyBox.setBackground(bg(C_CARD, 12));
+        keyBox.addView(text("API Key", 8, C_MUTED, false), fullWidth());
+        keyBox.addView(keyShown, fullWidth());
+        LinearLayout keyWrap = new LinearLayout(this);
+        keyWrap.setOrientation(LinearLayout.VERTICAL);
+        keyWrap.setPadding(0, dp(1), 0, dp(3));
+        keyWrap.addView(keyBox, fullWidth());
+        keyWrap.setClickable(true);
+        keyWrap.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                editTextDialog("API Key", soloKey == null ? "" : soloKey, "sk-…", new TextReady() {
+                    @Override
+                    public void onText(String value) {
+                        if (value.isEmpty()) return;
+                        soloKey = value;
+                        keyShown.setText(soloKey);
+                        keyShown.setTextColor(C_TEXT);
+                    }
+                });
+            }
+        });
+        body.addView(keyWrap, fullWidth());
+
+        final TextView model = text(soloModel().isEmpty() ? "未选择" : soloModel(), 9,
+                soloModel().isEmpty() ? C_MUTED : C_TEXT, false);
+        model.setSingleLine(true);
+        model.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        LinearLayout modelBox = new LinearLayout(this);
+        modelBox.setOrientation(LinearLayout.VERTICAL);
+        modelBox.setPadding(dp(10), dp(5), dp(10), dp(6));
+        modelBox.setBackground(bg(C_CARD, 12));
+        modelBox.addView(text("模型", 8, C_MUTED, false), fullWidth());
+        LinearLayout modelRow = row();
+        modelRow.setGravity(Gravity.CENTER_VERTICAL);
+        modelRow.addView(model, weight(1));
+        LinearLayout fetchButton = new LinearLayout(this);
+        fetchButton.setOrientation(LinearLayout.HORIZONTAL);
+        fetchButton.setGravity(Gravity.CENTER);
+        fetchButton.setBackground(bg(C_ACCENT, 10));
+        Glyph cloud = new Glyph(this, Glyph.CLOUD);
+        fetchButton.addView(cloud, lp(dp(18), dp(18), 0, 0, 3, 0));
+        fetchButton.addView(text("获取", 8, C_ON_ACCENT, true));
+        fetchButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (soloKey == null || soloKey.isEmpty()) {
+                    toast("先填 API Key");
+                    return;
+                }
+                if (soloBase().isEmpty()) {
+                    toast("先填 Base URL");
+                    return;
+                }
+                loadModels(soloBase(), soloKey, model);
+            }
+        });
+        modelRow.addView(fetchButton, lp(dp(64), dp(24), 4, 0, 0, 0));
+        modelBox.addView(modelRow, fullWidth());
+        LinearLayout modelWrap = new LinearLayout(this);
+        modelWrap.setOrientation(LinearLayout.VERTICAL);
+        modelWrap.setPadding(0, dp(1), 0, dp(3));
+        modelWrap.addView(modelBox, fullWidth());
+        body.addView(modelWrap, fullWidth());
+
+        Button save = smallButton("保存", C_ACCENT);
+        save.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String picked = model.getText().toString().trim();
+                if (!picked.isEmpty() && !"未选择".equals(picked)) soloModel = picked;
+                if (soloBase().isEmpty()) {
+                    toast("Base URL 不能为空");
+                    return;
+                }
+                if (soloKey == null || soloKey.isEmpty()) {
+                    toast("API Key 不能为空");
+                    return;
+                }
+                mode = "solo";
+                saveSoloConfig();
+                toast(soloModel().isEmpty() ? "已保存，点「获取」选个模型" : "已保存");
+                history.clear();
+                showSoloSessions();
+            }
+        });
+        body.addView(save, lp(-1, dp(32), 0, dp(8), 0, 0));
+
+        body.addView(pageRow("手机扫码填", "手机和手表连同一个 Wi-Fi", new Runnable() {
+            public void run() {
+                showSoloConfig(null);
+            }
+        }), fullWidth());
+
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        body.addView(soloQrView(), lp(-1, dp(150), 0, 0, 0, 0));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(body, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        page.addView(scroll, weightV());
+        readingDetail = false;
+        go(page);
+
+        configPageView = page;
+        configSig = soloConfigSig();
+        ui.removeCallbacks(configWatch);
+        ui.postDelayed(configWatch, 1200);
+    }
+
     /** Ask the API which models the key can use, then pick one. */
     void loadModels(final String base, final String key, final TextView target) {
         toast("正在获取模型…");
@@ -3753,10 +4510,10 @@ public class MainActivity extends Activity {
                         list.setOrientation(LinearLayout.VERTICAL);
                         for (String id : ids) {
                             final String choice = id;
-                            TextView row = text(id, 10, C_TEXT, false);
-                            row.setPadding(dp(10), dp(8), dp(10), dp(8));
-                            row.setBackground(bg(C_CARD, 10));
-                            row.setOnClickListener(new View.OnClickListener() {
+                            TextView item = text(id, 10, C_TEXT, false);
+                            item.setPadding(dp(10), dp(8), dp(10), dp(8));
+                            item.setBackground(bg(C_CARD, 10));
+                            item.setOnClickListener(new View.OnClickListener() {
                                 @Override
                                 public void onClick(View v) {
                                     target.setText(choice);
@@ -3767,7 +4524,7 @@ public class MainActivity extends Activity {
                             LinearLayout wrap = new LinearLayout(MainActivity.this);
                             wrap.setOrientation(LinearLayout.VERTICAL);
                             wrap.setPadding(0, dp(1), 0, dp(2));
-                            wrap.addView(row, fullWidth());
+                            wrap.addView(item, fullWidth());
                             list.addView(wrap, fullWidth());
                         }
                         scroll.addView(list, new FrameLayout.LayoutParams(
@@ -3788,676 +4545,6 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
-    }
-
-    interface TextReady {
-        void onText(String value);
-    }
-
-    /** Tap-to-edit: the inline EditText never got focus on this watch. */
-    void editTextDialog(String title, String initial, String hint, final TextReady ready) {
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setCanceledOnTouchOutside(true);
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(8), dp(6), dp(8), dp(6));
-        box.setBackground(bg(C_CARD_HI, 20));
-        box.addView(dialogHead(dialog, title), fullWidth());
-
-        final EditText input = edit(initial);
-        input.setHint(hint);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        input.setSingleLine(true);
-        input.setFocusableInTouchMode(true);
-        input.setShowSoftInputOnFocus(true);
-        box.addView(input, fullWidth());
-
-        Button save = smallButton("确定", C_ACCENT);
-        save.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                String value = input.getText().toString().trim();
-                dialog.dismiss();
-                ready.onText(value);
-            }
-        });
-        box.addView(save, lp(-1, dp(32), 0, dp(6), 0, 0));
-
-        dialog.setContentView(box);
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-            WindowManager.LayoutParams params = window.getAttributes();
-            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.96f);
-            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-            params.gravity = Gravity.CENTER;
-            window.setAttributes(params);
-        }
-        showPlain(dialog);
-        input.requestFocus();
-    }
-
-    /** One labelled value that opens the edit dialog when tapped. */
-    View valueRow(String label, String value, View.OnClickListener tap) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(10), dp(5), dp(10), dp(6));
-        box.setBackground(bg(C_CARD, 12));
-        box.addView(text(label, 8, C_MUTED, false), fullWidth());
-        TextView shown = text(value, 10, C_TEXT, false);
-        shown.setSingleLine(true);
-        shown.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        box.addView(shown, fullWidth());
-        LinearLayout wrap = new LinearLayout(this);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setPadding(0, dp(1), 0, dp(3));
-        wrap.addView(box, fullWidth());
-        wrap.setClickable(true);
-        wrap.setOnClickListener(tap);
-        return wrap;
-    }
-
-    int soloConfigSig() {
-        String base = prefs.getString("soloBase", "");
-        String key = prefs.getString("soloKey", "");
-        String model = prefs.getString("soloModel", "");
-        return (base + "|" + key + "|" + model).hashCode();
-    }
-
-    void showSoloConfig(String message) {
-        refreshSoloConfig();
-        soloBase = normalizeBase(soloBase());
-        LinearLayout page = secondary("独立使用");
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(0, dp(2), 0, dp(8));
-
-        TextView hint = text(message != null ? message
-                : "手表直接调模型，不经过 DSH。填一次就记住。", 9, C_MUTED, false);
-        hint.setPadding(dp(8), 0, dp(8), dp(5));
-        body.addView(hint, fullWidth());
-
-        final TextView baseShown = text(soloBase(), 10, C_TEXT, false);
-        baseShown.setSingleLine(true);
-        baseShown.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        LinearLayout baseBox = new LinearLayout(this);
-        baseBox.setOrientation(LinearLayout.VERTICAL);
-        baseBox.setPadding(dp(10), dp(5), dp(10), dp(6));
-        baseBox.setBackground(bg(C_CARD, 12));
-        baseBox.addView(text("Base URL", 8, C_MUTED, false), fullWidth());
-        baseBox.addView(baseShown, fullWidth());
-        LinearLayout baseWrap = new LinearLayout(this);
-        baseWrap.setOrientation(LinearLayout.VERTICAL);
-        baseWrap.setPadding(0, dp(1), 0, dp(3));
-        baseWrap.addView(baseBox, fullWidth());
-        baseWrap.setClickable(true);
-        baseWrap.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                editTextDialog("Base URL", soloBase(), "https://api.deepseek.com/v1",
-                        new TextReady() {
-                            @Override
-                            public void onText(String value) {
-                                if (value.isEmpty()) return;
-                                soloBase = normalizeBase(value);
-                                baseEdited = true;
-                                baseShown.setText(soloBase);
-                            }
-                        });
-            }
-        });
-        body.addView(baseWrap, fullWidth());
-
-        LinearLayout keyWrap = (LinearLayout) valueRow(
-                "API Key", soloKey == null || soloKey.isEmpty() ? "未填写" : soloKey,
-                new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        editTextDialog("API Key", soloKey == null ? "" : soloKey, "sk-…", new TextReady() {
-                            @Override
-                            public void onText(String value) {
-                                if (value.isEmpty()) return;
-                                soloKey = value;
-                                keyEdited = true;
-                                ((TextView) ((LinearLayout) ((LinearLayout) v.getParent())
-                                        .getChildAt(0)).getChildAt(1)).setText(soloKey);
-                            }
-                        });
-                    }
-                });
-        body.addView(keyWrap, fullWidth());
-
-        final TextView model = text(soloModel().isEmpty() ? "未选择" : soloModel(), 10,
-                soloModel().isEmpty() ? C_MUTED : C_TEXT, false);
-        model.setSingleLine(true);
-        model.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        LinearLayout modelBox = new LinearLayout(this);
-        modelBox.setOrientation(LinearLayout.VERTICAL);
-        modelBox.setPadding(dp(10), dp(5), dp(10), dp(6));
-        modelBox.setBackground(bg(C_CARD, 12));
-        modelBox.addView(text("模型", 8, C_MUTED, false), fullWidth());
-        LinearLayout modelRow = row();
-        modelRow.setGravity(Gravity.CENTER_VERTICAL);
-        modelRow.addView(model, weight(1));
-        LinearLayout loadModels = new LinearLayout(this);
-        loadModels.setOrientation(LinearLayout.HORIZONTAL);
-        loadModels.setGravity(Gravity.CENTER);
-        loadModels.setBackground(bg(C_ACCENT, 10));
-        Glyph cloud = new Glyph(this, Glyph.CLOUD);
-        loadModels.addView(cloud, lp(dp(18), dp(18), 0, 0, 3, 0));
-        loadModels.addView(text("获取", 8, C_ON_ACCENT, true));
-        loadModels.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (soloKey == null || soloKey.isEmpty()) {
-                    toast("先填 API Key");
-                    return;
-                }
-                loadModels(soloBase(), soloKey, model);
-            }
-        });
-        modelRow.addView(loadModels, lp(dp(64), dp(24), 4, 0, 0, 0));
-        modelBox.addView(modelRow, fullWidth());
-        LinearLayout modelWrap = new LinearLayout(this);
-        modelWrap.setOrientation(LinearLayout.VERTICAL);
-        modelWrap.setPadding(0, dp(1), 0, dp(3));
-        modelWrap.addView(modelBox, fullWidth());
-        body.addView(modelWrap, fullWidth());
-
-        Button save = smallButton("保存并开始", C_ACCENT);
-        save.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                // A phone-page save lands in prefs while this page is open; only
-                // what the user actually edited here may override it.
-                if (!baseEdited) {
-                    String stored = prefs.getString("soloBase", "");
-                    if (stored != null && !stored.isEmpty()) soloBase = stored;
-                }
-                if (!keyEdited) {
-                    String stored = prefs.getString("soloKey", "");
-                    if (stored != null && !stored.isEmpty()) soloKey = stored;
-                }
-                soloBase = normalizeBase(soloBase);
-                String picked = model.getText().toString().trim();
-                if (!picked.isEmpty() && !"未选择".equals(picked)) soloModel = picked;
-                if (soloBase().isEmpty()) {
-                    toast("Base URL 不能为空");
-                    return;
-                }
-                if (soloKey == null || soloKey.isEmpty()) {
-                    toast("API Key 不能为空");
-                    return;
-                }
-                mode = "solo";
-                saveSoloConfig();
-                if (soloModel.isEmpty()) {
-                    toast("已保存，点「获取」选个模型");
-                    showSoloConfig(null);
-                    return;
-                }
-                history.clear();
-                showSoloChat();
-            }
-        });
-        body.addView(save, lp(-1, dp(34), 0, dp(8), 0, 0));
-        body.addView(pageRow("清空配置", "地址、Key、模型和聊天记录都清掉", new Runnable() {
-            public void run() {
-                destructiveConfirm("清空配置？", "地址、Key、模型和聊天记录都会删掉", "清空", new Runnable() {
-                    @Override
-                    public void run() {
-                        soloBase = "";
-                        soloKey = "";
-                        soloModel = "";
-                        baseEdited = true;
-                        keyEdited = true;
-                        soloMessages = new JSONArray();
-                        saveSoloMessages();
-                        saveSoloConfig();
-                        showSoloConfig("已清空，重新填。");
-                    }
-                });
-            }
-        }), fullWidth());
-        body.addView(pageRow("切回远程连接", "回到连接 DSH 的模式", new Runnable() {
-            public void run() {
-                mode = "host";
-                saveSoloConfig();
-                history.clear();
-                showList();
-            }
-        }), fullWidth());
-
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        TextView tip = text("手机扫码填（手表保持亮屏，关屏就断了）", 8, C_MUTED, false);
-        tip.setPadding(dp(8), dp(12), dp(8), dp(4));
-        body.addView(tip, fullWidth());
-        body.addView(soloQrView(), lp(-1, dp(150), 0, 0, 0, 0));
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.addView(body, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        page.addView(scroll, weightV());
-        readingDetail = false;
-        go(page);
-    }
-
-    /** One labelled input row. */
-    View field(String label, EditText input) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(10), dp(4), dp(10), dp(4));
-        box.setBackground(bg(C_CARD, 12));
-        TextView name = text(label, 8, C_MUTED, false);
-        box.addView(name, fullWidth());
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-        input.setBackground(null);
-        input.setPadding(0, dp(1), 0, 0);
-        box.addView(input, fullWidth());
-        LinearLayout wrap = new LinearLayout(this);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setPadding(0, dp(1), 0, dp(3));
-        wrap.addView(box, fullWidth());
-        return wrap;
-    }
-
-    /** QR into the LAN page the phone opens to fill Base URL / key / model. */
-    View soloQrView() {
-        String startedUrl = SoloConfig.start(this);
-        SoloConfig.setListener(new SoloConfig.Listener() {
-            @Override
-            public void onSaved(String base, String key, String model) {
-                soloBase = base;
-                soloKey = key;
-                soloModel = model;
-                mode = "solo";
-                ui.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        toast("手机填好了，已保存");
-                        refreshSoloConfig();
-                        if (showing(screenPair)) return;
-                        history.clear();
-                        showSoloChat();
-                    }
-                });
-            }
-        });
-        String url = startedUrl;
-        final String text = url == null ? "http://" + (SoloConfig.localIp() == null ? "?" : SoloConfig.localIp()) + ":8788/" : url;
-        final boolean[][] grid = Qr.encode(text, Qr.M);
-        View view = new View(this) {
-            @Override
-            protected void onDraw(Canvas canvas) {
-                canvas.drawColor(0x00000000);
-                int w = getWidth();
-                int h = getHeight();
-                int side = Math.min(w, h);
-                int left = (w - side) / 2;
-                int top = (h - side) / 2;
-                Paint back = new Paint();
-                back.setColor(0xFFFFFFFF);
-                canvas.drawRoundRect(new RectF(left, top, left + side, top + side), dp(8), dp(8), back);
-                if (grid == null) return;
-                Paint ink = new Paint();
-                ink.setColor(0xFF0E1116);
-                ink.setAntiAlias(false);
-                int count = grid.length + 8;
-                float unit = (float) side / count;
-                for (int y = 0; y < grid.length; y += 1) {
-                    for (int x = 0; x < grid.length; x += 1) {
-                        if (!grid[y][x]) continue;
-                        float px = left + (x + 4) * unit;
-                        float py = top + (y + 4) * unit;
-                        canvas.drawRect(px, py, px + unit + 0.5f, py + unit + 0.5f, ink);
-                    }
-                }
-            }
-        };
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(view, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        TextView caption = text(text, 7, C_MUTED, true);
-        caption.setGravity(Gravity.CENTER);
-        caption.setPadding(0, dp(2), 0, 0);
-        box.addView(caption, fullWidth());
-        return box;
-    }
-
-    void showSoloChat() {
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setBackgroundColor(C_BG);
-
-        LinearLayout head = row();
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(dp(10), dp(6), dp(8), dp(2));
-        head.addView(text("独立使用", 12, C_ACCENT, true), weight(1));
-        Button config = smallButton("设置", C_CARD);
-        config.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showSoloConfig(null);
-            }
-        });
-        head.addView(config, lp(dp(52), dp(24), 0, 0, 6, 0));
-        Glyph menu = new Glyph(this, Glyph.MENU);
-        menu.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showColumnPage();
-            }
-        });
-        LinearLayout tools = row();
-        tools.setGravity(Gravity.CENTER_VERTICAL);
-        tools.setBackground(bg(C_CARD, 11));
-        tools.addView(menu, lp(dp(30), dp(22), 0, 0, 0, 0));
-        head.addView(tools, lp(-2, dp(22), 0, 0, 0, 0));
-        page.addView(head, fullWidth());
-
-        soloStatus = text("", 8, C_MUTED, false);
-        soloStatus.setPadding(dp(10), 0, dp(10), dp(2));
-        page.addView(soloStatus, fullWidth());
-
-        soloLog = new LinearLayout(this);
-        soloLog.setOrientation(LinearLayout.VERTICAL);
-        soloLog.setPadding(dp(8), dp(2), dp(8), dp(4));
-        soloScroll = new ScrollView(this);
-        soloScroll.setVerticalScrollBarEnabled(false);
-        soloScroll.addView(soloLog, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        page.addView(soloScroll, weightV());
-
-        LinearLayout actions = row();
-        actions.setPadding(dp(6), dp(2), dp(6), dp(6));
-        Button clear = smallButton("新对话", C_CARD);
-        clear.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                destructiveConfirm("开新对话？", "上面的内容会清掉", "新对话", new Runnable() {
-                    @Override
-                    public void run() {
-                        if (soloBusy) return;
-                        soloMessages = new JSONArray();
-                        saveSoloMessages();
-                        renderSolo();
-                    }
-                });
-            }
-        });
-        actions.addView(clear, weightH(32));
-        Button say = smallButton("说一句", C_BLUE);
-        say.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showSoloSay();
-            }
-        });
-        actions.addView(say, weightH(32));
-        page.addView(actions, fullWidth());
-
-        readingDetail = false;
-        showScreen(page);
-        renderSolo();
-    }
-
-    void renderSolo() {
-        if (soloLog == null) return;
-        soloLog.removeAllViews();
-        if (soloStatus != null) {
-            soloStatus.setText((soloModel().isEmpty() ? "未选模型" : soloModel())
-                    + " · " + soloHostLabel(soloBase()));
-        }
-        int count = soloMessages == null ? 0 : soloMessages.length();
-        if (count == 0) {
-            TextView empty = text("问点什么吧。这条链路不经过 DSH，手表直接调模型。", 9, C_MUTED, false);
-            empty.setPadding(dp(4), dp(8), dp(4), 0);
-            soloLog.addView(empty, fullWidth());
-            return;
-        }
-        for (int i = 0; i < count; i += 1) {
-            JSONObject item = soloMessages.optJSONObject(i);
-            if (item == null) continue;
-            boolean mine = "user".equals(item.optString("role"));
-            LinearLayout bubble = new LinearLayout(this);
-            bubble.setOrientation(LinearLayout.VERTICAL);
-            bubble.setPadding(dp(9), dp(7), dp(9), dp(7));
-            bubble.setBackground(bg(mine ? C_CARD_HI : C_CARD, 12));
-            TextView who = text(mine ? "我" : "模型", 8, mine ? C_BLUE : C_ACCENT, true);
-            bubble.addView(who, fullWidth());
-            TextView body = text(item.optString("content", ""), 10, C_TEXT, false);
-            body.setTextIsSelectable(true);
-            bubble.addView(body, fullWidth());
-            LinearLayout wrap = new LinearLayout(this);
-            wrap.setOrientation(LinearLayout.VERTICAL);
-            wrap.setPadding(0, dp(1), 0, dp(3));
-            wrap.addView(bubble, fullWidth());
-            soloLog.addView(wrap, fullWidth());
-        }
-        final ScrollView scroll = soloScroll;
-        ui.post(new Runnable() {
-            @Override
-            public void run() {
-                if (scroll != null) scroll.fullScroll(View.FOCUS_DOWN);
-            }
-        });
-    }
-
-    /** sk-abcdef…wxyz: enough to recognise, not enough to leak. */
-    String maskKey(String value) {
-        if (value == null || value.length() <= 8) return "sk-****";
-        return value.substring(0, 3) + "****" + value.substring(value.length() - 4);
-    }
-
-    String soloHostLabel(String url) {
-        if (url == null) return "";
-        String clean = url.replace("https://", "").replace("http://", "");
-        if (clean.endsWith("/")) clean = clean.substring(0, clean.length() - 1);
-        return clean;
-    }
-
-    void showSoloSay() {
-        if (soloBusy) {
-            toast("上一条还没回完");
-            return;
-        }
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setCanceledOnTouchOutside(true);
-        LinearLayout island = new LinearLayout(this);
-        island.setOrientation(LinearLayout.HORIZONTAL);
-        island.setGravity(Gravity.CENTER_VERTICAL);
-        island.setPadding(dp(8), dp(5), dp(6), dp(5));
-        island.setBackground(bg(C_CARD_HI, 18));
-
-        final EditText input = edit("");
-        input.setHint("说点什么…");
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        input.setSingleLine(true);
-        input.setFocusableInTouchMode(true);
-        input.setShowSoftInputOnFocus(true);
-        input.setBackground(null);
-        island.addView(input, weight(1));
-
-        Button send = roundKey("↑", C_ACCENT);
-        send.setTextColor(C_ON_ACCENT);
-        send.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                String typed = input.getText().toString().trim();
-                if (typed.isEmpty()) return;
-                dialog.dismiss();
-                sendSolo(typed);
-            }
-        });
-        island.addView(send, lp(dp(30), dp(30), 5, 0, 0, 0));
-
-        dialog.setContentView(island);
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-            WindowManager.LayoutParams params = window.getAttributes();
-            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.96f);
-            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-            params.gravity = Gravity.BOTTOM;
-            params.y = dp(8);
-            window.setAttributes(params);
-        }
-        dialog.show();
-    }
-
-    void sendSolo(final String typed) {
-        try {
-            JSONObject user = new JSONObject();
-            user.put("role", "user");
-            user.put("content", typed);
-            soloMessages.put(user);
-            JSONObject empty = new JSONObject();
-            empty.put("role", "assistant");
-            empty.put("content", "");
-            soloMessages.put(empty);
-            saveSoloMessages();
-            renderSolo();
-            soloBusy = true;
-            soloThread = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    callSoloApi();
-                }
-            });
-            soloThread.start();
-        } catch (Exception err) {
-            toast("发送失败 " + err.getMessage());
-            soloBusy = false;
-        }
-    }
-
-    /** One blocking call to /chat/completions; the reply replaces the empty bubble. */
-    void callSoloApi() {
-        refreshSoloConfig();
-        String error = null;
-        String answer = "";
-        HttpURLConnection conn = null;
-        if (soloModel().isEmpty()) {
-            finishSolo("还没选模型。回设置里点「获取」，选一个。");
-            return;
-        }
-        try {
-            JSONArray sent = new JSONArray();
-            for (int i = 0; i < soloMessages.length(); i += 1) {
-                JSONObject item = soloMessages.optJSONObject(i);
-                if (item == null) continue;
-                String role = item.optString("role");
-                String content = item.optString("content");
-                if ("assistant".equals(role) && content.isEmpty()) continue;
-                JSONObject out = new JSONObject();
-                out.put("role", role);
-                out.put("content", content);
-                sent.put(out);
-            }
-            JSONObject body = new JSONObject();
-            body.put("model", soloModel());
-            body.put("messages", sent);
-            body.put("stream", false);
-
-            String base = soloBase();
-            if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-            URL url = new URL(base + "/chat/completions");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(20000);
-            conn.setReadTimeout(120000);
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("Authorization", "Bearer " + soloKey);
-            byte[] payload = body.toString().getBytes("UTF-8");
-            conn.setFixedLengthStreamingMode(payload.length);
-            OutputStream out = conn.getOutputStream();
-            out.write(payload);
-            out.close();
-
-            int code = conn.getResponseCode();
-            InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            String raw = soloReadAll(stream);
-            if (code >= 400) {
-                error = "HTTP " + code + " " + shorten(raw, 120);
-            } else {
-                JSONObject root = new JSONObject(raw);
-                JSONArray choices = root.optJSONArray("choices");
-                if (choices != null && choices.length() > 0) {
-                    JSONObject first = choices.optJSONObject(0);
-                    JSONObject message = first == null ? null : first.optJSONObject("message");
-                    answer = message == null ? "" : message.optString("content", "");
-                }
-                if (answer.isEmpty()) error = "没有内容返回";
-            }
-        } catch (Throwable err) {
-            error = String.valueOf(err.getMessage());
-        } finally {
-            if (conn != null) conn.disconnect();
-        }
-
-        final String reply = answer;
-        final String failed = error;
-        ui.post(new Runnable() {
-            @Override
-            public void run() {
-                soloBusy = false;
-                int last = soloMessages.length() - 1;
-                JSONObject tail = last >= 0 ? soloMessages.optJSONObject(last) : null;
-                try {
-                    if (failed != null) {
-                        if (tail != null) tail.put("content", "出错了：" + failed);
-                    } else if (tail != null) {
-                        tail.put("content", reply);
-                    }
-                    saveSoloMessages();
-                } catch (Exception ignored) {
-                }
-                renderSolo();
-            }
-        });
-    }
-
-    /** Put a failure into the last bubble without touching the API. */
-    void finishSolo(final String message) {
-        ui.post(new Runnable() {
-            @Override
-            public void run() {
-                soloBusy = false;
-                int last = soloMessages.length() - 1;
-                JSONObject tail = last >= 0 ? soloMessages.optJSONObject(last) : null;
-                try {
-                    if (tail != null) tail.put("content", "出错了：" + message);
-                    saveSoloMessages();
-                } catch (Exception ignored) {
-                }
-                renderSolo();
-            }
-        });
-    }
-
-    String soloReadAll(InputStream stream) throws Exception {
-        if (stream == null) return "";
-        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
-        byte[] chunk = new byte[4096];
-        int n;
-        while ((n = stream.read(chunk)) > 0) buffer.write(chunk, 0, n);
-        stream.close();
-        return new String(buffer.toByteArray(), "UTF-8");
-    }
-
-    String shorten(String value, int max) {
-        if (value == null) return "";
-        String flat = value.replaceAll("[ \\t\\r\\n]+", " ").trim();
-        return flat.length() <= max ? flat : flat.substring(0, max) + "…";
     }
 
     // ============================================================== widgets
