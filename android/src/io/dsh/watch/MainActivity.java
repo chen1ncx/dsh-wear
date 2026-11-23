@@ -4110,7 +4110,7 @@ public class MainActivity extends Activity {
                         }), fullWidth());
             }
         }
-        page.addView(body, weightV());
+        scrollInto(page, body);
         readingDetail = false;
         go(page);
     }
@@ -4661,7 +4661,7 @@ public class MainActivity extends Activity {
                         showSoloSessions();
                     }
                 }), fullWidth());
-        page.addView(body, weightV());
+        scrollInto(page, body);
         readingDetail = false;
         go(page);
     }
@@ -4914,6 +4914,11 @@ public class MainActivity extends Activity {
                 showList();
             }
         }), fullWidth());
+        body.addView(pageRow("退出应用", "手表上的 DSH 会关掉", new Runnable() {
+            public void run() {
+                confirmQuit();
+            }
+        }), fullWidth());
         body.addView(pageRow("手机扫码填", "手机和手表连同一个 Wi-Fi", new Runnable() {
             public void run() {
                 showSoloConfig(null);
@@ -5022,7 +5027,7 @@ public class MainActivity extends Activity {
             });
             body.addView(row, fullWidth());
         }
-        page.addView(body, weightV());
+        scrollInto(page, body);
         readingDetail = false;
         go(page);
     }
@@ -5065,18 +5070,19 @@ public class MainActivity extends Activity {
                 }), fullWidth());
 
         final String[] levels = {"off", "low", "medium", "high"};
-        final String[] labels = {"关", "浅", "中", "深"};
         String current = prefs.getString("soloThink", "off");
-        for (int i = 0; i < levels.length; i += 1) {
-            final String level = levels[i];
-            body.addView(pageRow("思考深度 " + labels[i],
-                    level.equals(current) ? "当前" : "点一下切换", new Runnable() {
-                        public void run() {
-                            prefs.edit().putString("soloThink", level).apply();
-                            showParams();
+        body.addView(pageRow("思考深度 " + thinkingLabel(current),
+                "点一下换成下一档（关 → 浅 → 中 → 深）", new Runnable() {
+                    public void run() {
+                        String now = prefs.getString("soloThink", "off");
+                        int at = 0;
+                        for (int i = 0; i < levels.length; i += 1) {
+                            if (levels[i].equals(now)) at = i;
                         }
-                    }), fullWidth());
-        }
+                        prefs.edit().putString("soloThink", levels[(at + 1) % levels.length]).apply();
+                        showParams();
+                    }
+                }), fullWidth());
 
         body.addView(pageRow("最大输出 " + prefs.getInt("soloMaxTokens", 1024) + " tokens",
                 "模型单次回复的上限", new Runnable() {
@@ -5098,9 +5104,19 @@ public class MainActivity extends Activity {
                     }
                 }), fullWidth());
 
-        page.addView(body, weightV());
+        scrollInto(page, body);
         readingDetail = false;
         go(page);
+    }
+
+    /** Wrap a page body so long lists always scroll. */
+    void scrollInto(LinearLayout page, LinearLayout body) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setFillViewport(true);
+        scroll.addView(body, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        page.addView(scroll, weightV());
     }
 
     /** Ask the API which models the key can use, then pick one. */
