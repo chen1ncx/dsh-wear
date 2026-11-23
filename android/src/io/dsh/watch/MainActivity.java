@@ -959,6 +959,9 @@ public class MainActivity extends Activity {
         body.addView(pageRow("切换模式", "连接 DSH / 独立使用", new Runnable() {
             public void run() { showModePage(); }
         }), fullWidth());
+        body.addView(pageRow("独立使用设置", "接口地址、Key、模型", new Runnable() {
+            public void run() { showSoloConfig(null); }
+        }), fullWidth());
         body.addView(pageRow("关于", "开发者与版本", new Runnable() {
             public void run() { showAboutPage(); }
         }), fullWidth());
@@ -3670,25 +3673,25 @@ public class MainActivity extends Activity {
     void showSoloSessions() {
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         refreshSoloConfig();
-        LinearLayout page = secondary("独立使用");
+        LinearLayout page = page();
+        page.setPadding(dp(8), dp(6), dp(8), dp(6));
 
-        LinearLayout tools = row();
-        tools.setGravity(Gravity.CENTER_VERTICAL);
-        tools.setPadding(dp(8), dp(2), dp(8), dp(4));
-        TextView note = text(soloModel().isEmpty() ? "还没有配置模型" : soloModel()
-                + " · " + soloHostLabel(soloBase()), 8, C_MUTED, false);
-        note.setSingleLine(true);
-        note.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        tools.addView(note, weight(1));
         Button config = smallButton("设置", C_CARD);
         config.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                syncSoloFromPrefs();
                 showSoloConfig(null);
             }
         });
-        tools.addView(config, lp(dp(48), dp(24), 0, 0, 0, 0));
-        page.addView(tools, fullWidth());
+        page.addView(soloHeader("独立使用", config), fullWidth());
+
+        TextView status = text(soloModel().isEmpty() ? "还没有配置模型" : soloModel()
+                + " · " + soloHostLabel(soloBase()), 8, C_MUTED, false);
+        status.setSingleLine(true);
+        status.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        status.setPadding(dp(10), 0, dp(10), dp(4));
+        page.addView(status, fullWidth());
 
         JSONArray list = SoloStore.sessions(prefs);
         ScrollView scroll = new ScrollView(this);
@@ -4129,6 +4132,28 @@ public class MainActivity extends Activity {
         return flat.length() <= max ? flat : flat.substring(0, max) + "…";
     }
 
+    /** Header for standalone screens: title, optional right button, ☰. */
+    LinearLayout soloHeader(String title, View right) {
+        LinearLayout head = row();
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(8), dp(6), dp(8), dp(2));
+        head.addView(text(title, 12, C_ACCENT, true), weight(1));
+        if (right != null) head.addView(right, lp(dp(48), dp(24), 0, 0, 6, 0));
+        Glyph menu = new Glyph(this, Glyph.MENU);
+        menu.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showColumnPage();
+            }
+        });
+        LinearLayout capsule = row();
+        capsule.setGravity(Gravity.CENTER_VERTICAL);
+        capsule.setBackground(bg(C_CARD, 11));
+        capsule.addView(menu, lp(dp(30), dp(22), 0, 0, 0, 0));
+        head.addView(capsule, lp(-2, dp(22), 0, 0, 0, 0));
+        return head;
+    }
+
     // ============================================================== 扫码填
 
     /** QR of the phone page plus the URL under it. */
@@ -4290,7 +4315,9 @@ public class MainActivity extends Activity {
 
     void showSoloConfig(String message) {
         refreshSoloConfig();
-        LinearLayout page = secondary("独立使用");
+        LinearLayout page = page();
+        page.setPadding(dp(8), dp(6), dp(8), dp(6));
+        page.addView(soloHeader("独立使用设置", null), fullWidth());
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
@@ -4428,6 +4455,14 @@ public class MainActivity extends Activity {
         });
         body.addView(save, lp(-1, dp(32), 0, dp(8), 0, 0));
 
+        body.addView(pageRow("切回连接 DSH", "回到远程模式", new Runnable() {
+            public void run() {
+                mode = "host";
+                saveSoloConfig();
+                history.clear();
+                showList();
+            }
+        }), fullWidth());
         body.addView(pageRow("手机扫码填", "手机和手表连同一个 Wi-Fi", new Runnable() {
             public void run() {
                 showSoloConfig(null);
@@ -4449,6 +4484,11 @@ public class MainActivity extends Activity {
         configSig = soloConfigSig();
         ui.removeCallbacks(configWatch);
         ui.postDelayed(configWatch, 1200);
+    }
+
+    /** Pull the values the phone page may have written while this page was open. */
+    void syncSoloFromPrefs() {
+        refreshSoloConfig();
     }
 
     /** Ask the API which models the key can use, then pick one. */
