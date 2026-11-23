@@ -43,6 +43,34 @@ final class SoloAgent {
                             .put("required", new JSONArray().put("text"))));
             list.put(tool("note_list", "读出手表记事本的全部内容",
                     new JSONObject().put("type", "object").put("properties", new JSONObject())));
+            list.put(tool("list_files", "列出手表应用目录或 Download/DSH-Go 里的文件",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("dir", new JSONObject().put("type", "string")
+                                            .put("description", "留空看全部")))));
+            list.put(tool("delete_file", "删一个文件（只在手表应用目录或 Download/DSH-Go 里）",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("path", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("path"))));
+            list.put(tool("append_file", "往文件末尾追加内容",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("path", new JSONObject().put("type", "string"))
+                                    .put("content", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("path").put("content"))));
+            list.put(tool("set_alarm", "在手表上设一个闹钟",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("hour", new JSONObject().put("type", "integer"))
+                                    .put("minute", new JSONObject().put("type", "integer"))
+                                    .put("label", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("hour").put("minute"))));
+            list.put(tool("http_fetch", "抓一个网址的正文（纯文本，最多 4000 字）",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("url", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("url"))));
             list.put(tool("file_read", "读一个文件（只能在手表应用目录或 Download/DSH-Go 里）",
                     new JSONObject().put("type", "object")
                             .put("properties", new JSONObject()
@@ -73,16 +101,25 @@ final class SoloAgent {
 
     /** Tools that only read; everything else asks first. */
     static boolean needsApproval(String name) {
-        return "file_write".equals(name) || "file_read".equals(name);
+        return "file_write".equals(name) || "file_read".equals(name)
+                || "delete_file".equals(name) || "append_file".equals(name)
+                || "http_fetch".equals(name) || "list_files".equals(name);
     }
 
     static String describe(String name, JSONObject args) {
         if (args == null) args = new JSONObject();
         if ("calc".equals(name)) return args.optString("expr");
         if ("note_add".equals(name)) return args.optString("text");
-        if ("file_read".equals(name) || "file_write".equals(name)) {
+        if ("file_read".equals(name) || "file_write".equals(name)
+                || "delete_file".equals(name) || "append_file".equals(name)) {
             return args.optString("path");
         }
+        if ("list_files".equals(name)) return args.optString("dir");
+        if ("set_alarm".equals(name)) {
+            return args.optInt("hour", 0) + ":" + args.optInt("minute", 0)
+                    + " " + args.optString("label");
+        }
+        if ("http_fetch".equals(name)) return args.optString("url");
         if ("now".equals(name)) return "现在几点";
         if ("note_list".equals(name)) return "看看记事本";
         return name;
@@ -113,6 +150,53 @@ final class SoloAgent {
                 File notes = new File(context.getFilesDir(), "notes.txt");
                 if (!notes.exists()) return "记事本是空的";
                 return readFile(notes, 4000);
+            }
+            if ("list_files".equals(name)) {
+                File dir = resolveDir(context, args.optString("dir"));
+                if (dir == null || !dir.isDirectory()) return "没有这个目录";
+                File[] files = dir.listFiles();
+                if (files == null || files.length == 0) return "空目录";
+                StringBuilder out = new StringBuilder();
+                for (File f : files) {
+                    out.append(f.getName()).append(f.isDirectory() ? "/" : "")
+                            .append(" (").append(f.length()).append("B)\n");
+                }
+                return out.toString();
+            }
+            if ("delete_file".equals(name)) {
+                File file = resolve(context, args.optString("path"));
+                if (file == null) return "路径不允许";
+                return file.delete() ? "删掉了 " + args.optString("path") : "没有这个文件";
+            }
+            if ("append_file".equals(name)) {
+                File file = resolve(context, args.optString("path"));
+                if (file == null) return "路径不允许";
+                File parent = file.getParentFile();
+                if (parent != null && !parent.exists()) parent.mkdirs();
+                FileOutputStream out = new FileOutputStream(file, true);
+                out.write(args.optString("content").getBytes("UTF-8"));
+                out.close();
+                return "追加好了，现在 " + file.length() + " 字节";
+            }
+            if ("set_alarm".equals(name)) {
+                return "闹钟要在手表上确认："
+                        + args.optInt("hour", 0) + ":" + String.format(Locale.CHINA, "%02d",
+                        args.optInt("minute", 0));
+            }
+            if ("http_fetch".equals(name)) {
+                String url = args.optString("url");
+                if (!url.startsWith("http")) return "只支持 http/https";
+                java.net.URLConnection raw = new java.net.URL(url).openConnection();
+                raw.setConnectTimeout(12000);
+                raw.setReadTimeout(15000);
+                raw.setRequestProperty("User-Agent", "dsh-watch");
+                java.io.InputStream stream = raw.getInputStream();
+                String text = readStream(stream, 4000);
+                String body = text.replaceAll("(?is)<script.*?</script>", " ")
+                        .replaceAll("(?is)<style.*?</style>", " ")
+                        .replaceAll("<[^>]+>", " ")
+                        .replaceAll("[ \t\r\n]+", " ").trim();
+                return body.isEmpty() ? "抓到了空内容" : body;
             }
             if ("file_read".equals(name)) {
                 File file = resolve(context, args.optString("path"));
@@ -150,6 +234,28 @@ final class SoloAgent {
         File external = new File("/sdcard/Download/DSH-Go");
         if (!external.exists()) external.mkdirs();
         return new File(external, clean);
+    }
+
+    /** Directory for list_files: "" means both roots. */
+    static File resolveDir(Context context, String dir) {
+        if (dir == null || dir.isEmpty() || "/".equals(dir)) {
+            return context.getFilesDir();
+        }
+        File file = resolve(context, dir);
+        return file != null && file.isDirectory() ? file : null;
+    }
+
+    private static String readStream(java.io.InputStream stream, int max) throws Exception {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        int n;
+        while ((n = stream.read(chunk)) > 0) {
+            buffer.write(chunk, 0, n);
+            if (buffer.size() > max * 4) break;
+        }
+        stream.close();
+        String text = new String(buffer.toByteArray(), "UTF-8");
+        return text.length() > max ? text.substring(0, max) : text;
     }
 
     static File artifactsDir(Context context) {

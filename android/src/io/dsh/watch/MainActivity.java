@@ -3601,6 +3601,7 @@ public class MainActivity extends Activity {
     LinearLayout soloLog;
     ScrollView soloScroll;
     TextView soloStatus;
+    TextView soloEvent;
     boolean baseEdited;
     boolean keyEdited;
     String soloOpen;
@@ -3825,6 +3826,12 @@ public class MainActivity extends Activity {
         soloStatus = text((soloModel().isEmpty() ? "未选模型" : soloModel())
                 + " · " + soloHostLabel(soloBase()), 8, C_MUTED, false);
         soloStatus.setPadding(dp(10), 0, dp(10), dp(2));
+        soloEvent = text("", 8, C_MUTED, false);
+        soloEvent.setPadding(dp(10), 0, dp(10), dp(2));
+        soloEvent.setSingleLine(true);
+        soloEvent.setEllipsize(TextUtils.TruncateAt.END);
+        page.addView(soloEvent, fullWidth());
+
         LinearLayout statusRow = row();
         statusRow.setGravity(Gravity.CENTER_VERTICAL);
         statusRow.addView(soloStatus, weight(1));
@@ -4007,6 +4014,16 @@ public class MainActivity extends Activity {
         });
         box.addView(again, lp(-1, dp(30), 0, dp(4), 0, 0));
 
+        Button export = smallButton("导出这条对话", C_CARD);
+        export.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                exportChat(session);
+            }
+        });
+        box.addView(export, lp(-1, dp(30), 0, dp(4), 0, 0));
+
         Button saveAs = smallButton("存成产物", C_BLUE);
         saveAs.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -4028,6 +4045,23 @@ public class MainActivity extends Activity {
             window.setAttributes(params);
         }
         showPlain(dialog);
+    }
+
+    void exportChat(JSONObject session) {
+        try {
+            JSONArray messages = session.optJSONArray("messages");
+            StringBuilder out = new StringBuilder("# ");
+            out.append(SoloStore.titleOf(session)).append("\n\n");
+            for (int i = 0; messages != null && i < messages.length(); i += 1) {
+                JSONObject item = messages.optJSONObject(i);
+                if (item == null || "tool".equals(item.optString("role"))) continue;
+                out.append("**").append("user".equals(item.optString("role")) ? "我" : "模型")
+                        .append("**\n\n").append(item.optString("content")).append("\n\n");
+            }
+            saveArtifact(out.toString());
+        } catch (Exception err) {
+            toast("导出失败 " + err.getMessage());
+        }
     }
 
     void saveArtifact(String content) {
@@ -4203,12 +4237,17 @@ public class MainActivity extends Activity {
 
             for (int round = 0; round < 5; round += 1) {
                 if (soloCancelled) break;
+                eventSolo("第 " + (round + 1) + " 轮：问模型…");
                 JSONObject body = new JSONObject();
                 body.put("model", soloModel());
                 body.put("messages", messageForApi(messages));
                 body.put("stream", false);
                 body.put("tools", SoloAgent.tools());
                 body.put("tool_choice", "auto");
+                body.put("temperature", prefs.getFloat("soloTemp", 0.7f));
+                body.put("max_tokens", prefs.getInt("soloMaxTokens", 1024));
+                String depth = prefs.getString("soloThink", "off");
+                if (!"off".equals(depth)) body.put("reasoning_effort", depth);
 
                 String base = soloBase();
                 if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
@@ -4281,6 +4320,7 @@ public class MainActivity extends Activity {
                             continue;
                         }
                     }
+                    eventSolo("跑工具：" + name + " " + shorten(detail, 20));
                     String result = SoloAgent.run(MainActivity.this, name, args);
                     JSONObject card = new JSONObject();
                     card.put("name", name);
@@ -4310,6 +4350,7 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 soloBusy = false;
+                eventSolo("");
                 JSONArray messages = session.optJSONArray("messages");
                 int last = messages == null ? -1 : messages.length() - 1;
                 JSONObject tail = last >= 0 ? messages.optJSONObject(last) : null;
@@ -4451,6 +4492,16 @@ public class MainActivity extends Activity {
                             .append(" ").append(card.optString("detail"));
                 }
                 paintSolo(text.toString());
+            }
+        });
+    }
+
+    /** Running steps shown under the title while a turn is in flight. */
+    void eventSolo(final String step) {
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                if (soloEvent != null) soloEvent.setText(step);
             }
         });
     }
@@ -4821,6 +4872,7 @@ public class MainActivity extends Activity {
                 }
                 mode = "solo";
                 saveSoloConfig();
+                saveActiveProfile();
                 toast(soloModel().isEmpty() ? "已保存，点「获取」选个模型" : "已保存");
                 history.clear();
                 showSoloSessions();
@@ -4828,6 +4880,17 @@ public class MainActivity extends Activity {
         });
         body.addView(save, lp(-1, dp(32), 0, dp(8), 0, 0));
 
+        body.addView(pageRow("供应商", profileCount() + " 套，当前 "
+                + activeProfileName(), new Runnable() {
+            public void run() {
+                showProfiles();
+            }
+        }), fullWidth());
+        body.addView(pageRow("参数", paramSummary(), new Runnable() {
+            public void run() {
+                showParams();
+            }
+        }), fullWidth());
         body.addView(pageRow("产物", "存在表上的文件（长按回复可存）", new Runnable() {
             public void run() {
                 showArtifacts();
@@ -4867,6 +4930,166 @@ public class MainActivity extends Activity {
     /** Pull the values the phone page may have written while this page was open. */
     void syncSoloFromPrefs() {
         refreshSoloConfig();
+    }
+
+    int profileCount() {
+        return SoloStore.profiles(prefs).length();
+    }
+
+    String activeProfileName() {
+        JSONObject active = SoloStore.activeProfile(prefs);
+        if (active == null) return "默认";
+        String name = active.optString("name", "");
+        return name.isEmpty() ? "默认" : name;
+    }
+
+    /** Settings derive from the active profile when one exists. */
+    void applyActiveProfile() {
+        JSONObject active = SoloStore.activeProfile(prefs);
+        if (active == null) return;
+        soloBase = active.optString("base", soloBase);
+        soloKey = active.optString("key", soloKey);
+        soloModel = active.optString("model", soloModel);
+    }
+
+    void saveActiveProfile() {
+        JSONObject active = SoloStore.activeProfile(prefs);
+        if (active == null) {
+            SoloStore.addProfile(prefs, "默认", soloBase(), soloKey, soloModel());
+        } else {
+            SoloStore.updateProfile(prefs, active.optString("id"),
+                    active.optString("name", "默认"), soloBase(), soloKey, soloModel());
+        }
+    }
+
+    void showProfiles() {
+        LinearLayout page = secondary("供应商");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(6));
+        body.addView(pageRow("＋ 新增一套", "填新的地址和 Key", new Runnable() {
+            public void run() {
+                soloBase = "";
+                soloKey = "";
+                soloModel = "";
+                showSoloConfig("新的一套：填完点保存");
+            }
+        }), fullWidth());
+
+        JSONArray list = SoloStore.profiles(prefs);
+        String activeId = prefs.getString("soloActive", "");
+        for (int i = 0; i < list.length(); i += 1) {
+            final JSONObject item = list.optJSONObject(i);
+            if (item == null) continue;
+            String name = item.optString("name", "未命名");
+            final String id = item.optString("id");
+            String hint = item.optString("model", "未选模型") + " · "
+                    + soloHostLabel(item.optString("base")) + (id.equals(activeId) ? "　●" : "");
+            View row = pageRow(name, hint, new Runnable() {
+                public void run() {
+                    prefs.edit().putString("soloActive", id).apply();
+                    applyActiveProfile();
+                    saveSoloConfig();
+                    toast("切到 " + item.optString("name"));
+                    showProfiles();
+                }
+            });
+            row.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    destructiveConfirm("删掉这套配置？", "Key 也会一起删", "删除", new Runnable() {
+                        @Override
+                        public void run() {
+                            SoloStore.removeProfile(prefs, id);
+                            applyActiveProfile();
+                            saveSoloConfig();
+                            showProfiles();
+                        }
+                    });
+                    return true;
+                }
+            });
+            body.addView(row, fullWidth());
+        }
+        page.addView(body, weightV());
+        readingDetail = false;
+        go(page);
+    }
+
+    String paramSummary() {
+        return "温度 " + prefs.getFloat("soloTemp", 0.7f)
+                + " · 思考 " + thinkingLabel(prefs.getString("soloThink", "off"));
+    }
+
+    String thinkingLabel(String value) {
+        if ("low".equals(value)) return "浅";
+        if ("medium".equals(value)) return "中";
+        if ("high".equals(value)) return "深";
+        return "关";
+    }
+
+    void showParams() {
+        LinearLayout page = secondary("参数");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(6));
+
+        body.addView(pageRow("温度 " + prefs.getFloat("soloTemp", 0.7f),
+                "越高越发散，0–2", new Runnable() {
+                    public void run() {
+                        editTextDialog("温度", String.valueOf(prefs.getFloat("soloTemp", 0.7f)),
+                                "0.7", new TextReady() {
+                                    @Override
+                                    public void onText(String value) {
+                                        try {
+                                            float temp = Float.parseFloat(value);
+                                            temp = Math.max(0f, Math.min(2f, temp));
+                                            prefs.edit().putFloat("soloTemp", temp).apply();
+                                        } catch (Exception ignored) {
+                                        }
+                                        showParams();
+                                    }
+                                });
+                    }
+                }), fullWidth());
+
+        final String[] levels = {"off", "low", "medium", "high"};
+        final String[] labels = {"关", "浅", "中", "深"};
+        String current = prefs.getString("soloThink", "off");
+        for (int i = 0; i < levels.length; i += 1) {
+            final String level = levels[i];
+            body.addView(pageRow("思考深度 " + labels[i],
+                    level.equals(current) ? "当前" : "点一下切换", new Runnable() {
+                        public void run() {
+                            prefs.edit().putString("soloThink", level).apply();
+                            showParams();
+                        }
+                    }), fullWidth());
+        }
+
+        body.addView(pageRow("最大输出 " + prefs.getInt("soloMaxTokens", 1024) + " tokens",
+                "模型单次回复的上限", new Runnable() {
+                    public void run() {
+                        editTextDialog("最大输出",
+                                String.valueOf(prefs.getInt("soloMaxTokens", 1024)), "1024",
+                                new TextReady() {
+                                    @Override
+                                    public void onText(String value) {
+                                        try {
+                                            int max = Integer.parseInt(value);
+                                            max = Math.max(128, Math.min(8192, max));
+                                            prefs.edit().putInt("soloMaxTokens", max).apply();
+                                        } catch (Exception ignored) {
+                                        }
+                                        showParams();
+                                    }
+                                });
+                    }
+                }), fullWidth());
+
+        page.addView(body, weightV());
+        readingDetail = false;
+        go(page);
     }
 
     /** Ask the API which models the key can use, then pick one. */
