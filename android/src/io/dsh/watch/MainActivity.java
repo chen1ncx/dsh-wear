@@ -960,9 +960,6 @@ public class MainActivity extends Activity {
         body.addView(pageRow("切换模式", "连接 DSH / 独立使用", new Runnable() {
             public void run() { showModePage(); }
         }), fullWidth());
-        body.addView(pageRow("独立使用设置", "接口地址、Key、模型", new Runnable() {
-            public void run() { showSoloConfig(null); }
-        }), fullWidth());
         body.addView(pageRow("关于", "开发者与版本", new Runnable() {
             public void run() { showAboutPage(); }
         }), fullWidth());
@@ -3576,6 +3573,10 @@ public class MainActivity extends Activity {
     /** System back: one step out of the current screen. */
     @Override
     public void onBackPressed() {
+        if (soloRootPage != null && showing(soloRootPage)) {
+            super.onBackPressed();
+            return;
+        }
         if (showing(screenDetail)) {
             selectedId = null;
             showList();
@@ -3602,6 +3603,8 @@ public class MainActivity extends Activity {
     ScrollView soloScroll;
     TextView soloStatus;
     TextView soloEvent;
+    View soloRootPage;
+    boolean newProfile;
     boolean baseEdited;
     boolean keyEdited;
     String soloOpen;
@@ -3754,7 +3757,9 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         page.addView(scroll, weightV());
         readingDetail = false;
-        go(page);
+        history.clear();
+        showScreen(page);
+        soloRootPage = page;
     }
 
     JSONObject openSession() {
@@ -3782,16 +3787,16 @@ public class MainActivity extends Activity {
 
         LinearLayout head = row();
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(dp(8), dp(6), dp(8), dp(2));
-        TextView back = text("‹", 20, C_BLUE, true);
-        back.setPadding(dp(6), 0, dp(6), 0);
+        head.setPadding(dp(6), dp(6), dp(8), dp(2));
+        TextView back = text("‹ 列表", 10, C_BLUE, true);
+        back.setPadding(dp(4), dp(2), dp(6), dp(2));
         back.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 showSoloSessions();
             }
         });
-        head.addView(back, lp(-2, -2, 0, 0, 0, 0));
+        head.addView(back, lp(-2, -2, 0, 0, 8, 0));
         TextView title = text(SoloStore.titleOf(session), 11, C_ACCENT, true);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
@@ -3873,7 +3878,7 @@ public class MainActivity extends Activity {
         page.addView(actions, fullWidth());
 
         readingDetail = false;
-        showScreen(page);
+        go(page);
         renderSolo();
     }
 
@@ -4872,7 +4877,12 @@ public class MainActivity extends Activity {
                 }
                 mode = "solo";
                 saveSoloConfig();
-                saveActiveProfile();
+                if (newProfile) {
+                    newProfile = false;
+                    SoloStore.addProfile(prefs, soloHostLabel(soloBase()), soloBase(), soloKey, soloModel());
+                } else {
+                    saveActiveProfile();
+                }
                 toast(soloModel().isEmpty() ? "已保存，点「获取」选个模型" : "已保存");
                 history.clear();
                 showSoloSessions();
@@ -4972,6 +4982,7 @@ public class MainActivity extends Activity {
                 soloBase = "";
                 soloKey = "";
                 soloModel = "";
+                newProfile = true;
                 showSoloConfig("新的一套：填完点保存");
             }
         }), fullWidth());
