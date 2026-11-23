@@ -9,6 +9,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 
@@ -66,6 +67,16 @@ final class SoloAgent {
                                     .put("minute", new JSONObject().put("type", "integer"))
                                     .put("label", new JSONObject().put("type", "string")))
                             .put("required", new JSONArray().put("hour").put("minute"))));
+            list.put(tool("set_timer", "在手表上开一个倒计时",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("seconds", new JSONObject().put("type", "integer"))
+                                    .put("label", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("seconds"))));
+            list.put(tool("list_alarms", "看手表上下一个闹钟",
+                    new JSONObject().put("type", "object").put("properties", new JSONObject())));
+            list.put(tool("cancel_alarm", "关掉手表上正在响/下一个闹钟",
+                    new JSONObject().put("type", "object").put("properties", new JSONObject())));
             list.put(tool("http_fetch", "抓一个网址的正文（纯文本，最多 4000 字）",
                     new JSONObject().put("type", "object")
                             .put("properties", new JSONObject()
@@ -101,7 +112,8 @@ final class SoloAgent {
 
     /** Tools that only read; everything else asks first. */
     static boolean needsApproval(String name) {
-        return "file_write".equals(name) || "file_read".equals(name)
+        return "set_alarm".equals(name) || "set_timer".equals(name) || "cancel_alarm".equals(name)
+                || "file_write".equals(name) || "file_read".equals(name)
                 || "delete_file".equals(name) || "append_file".equals(name)
                 || "http_fetch".equals(name) || "list_files".equals(name);
     }
@@ -119,6 +131,9 @@ final class SoloAgent {
             return args.optInt("hour", 0) + ":" + args.optInt("minute", 0)
                     + " " + args.optString("label");
         }
+        if ("set_timer".equals(name)) return args.optInt("seconds", 0) + " 秒 " + args.optString("label");
+        if ("cancel_alarm".equals(name)) return "关掉闹钟";
+        if ("list_alarms".equals(name)) return "看下一个闹钟";
         if ("http_fetch".equals(name)) return args.optString("url");
         if ("now".equals(name)) return "现在几点";
         if ("note_list".equals(name)) return "看看记事本";
@@ -179,9 +194,52 @@ final class SoloAgent {
                 return "追加好了，现在 " + file.length() + " 字节";
             }
             if ("set_alarm".equals(name)) {
-                return "闹钟要在手表上确认："
-                        + args.optInt("hour", 0) + ":" + String.format(Locale.CHINA, "%02d",
-                        args.optInt("minute", 0));
+                int hour = Math.max(0, Math.min(23, args.optInt("hour", 0)));
+                int minute = Math.max(0, Math.min(59, args.optInt("minute", 0)));
+                android.content.Intent intent = new android.content.Intent(
+                        "android.intent.action.SET_ALARM");
+                intent.putExtra("android.intent.extra.alarm.HOUR", hour);
+                intent.putExtra("android.intent.extra.alarm.MINUTES", minute);
+                String label = args.optString("label", "");
+                if (!label.isEmpty()) {
+                    intent.putExtra("android.intent.extra.alarm.MESSAGE", label);
+                }
+                intent.putExtra("android.intent.extra.alarm.SKIP_UI", true);
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+                return "已设闹钟 " + String.format(Locale.CHINA, "%02d:%02d", hour, minute)
+                        + (label.isEmpty() ? "" : "（" + label + "）");
+            }
+            if ("set_timer".equals(name)) {
+                int seconds = Math.max(1, Math.min(86400, args.optInt("seconds", 60)));
+                android.content.Intent intent = new android.content.Intent(
+                        "android.intent.action.SET_TIMER");
+                intent.putExtra("android.intent.extra.alarm.LENGTH", seconds);
+                String label = args.optString("label", "");
+                if (!label.isEmpty()) {
+                    intent.putExtra("android.intent.extra.alarm.MESSAGE", label);
+                }
+                intent.putExtra("android.intent.extra.alarm.SKIP_UI", true);
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+                return "开始计时 " + seconds + " 秒";
+            }
+            if ("list_alarms".equals(name)) {
+                String next = android.provider.Settings.System.getString(
+                        context.getContentResolver(),
+                        android.provider.Settings.System.NEXT_ALARM_FORMATTED);
+                return next == null || next.isEmpty() ? "系统里没有待响的闹钟" : "下一个闹钟：" + next;
+            }
+            if ("cancel_alarm".equals(name)) {
+                android.content.Intent intent = new android.content.Intent(
+                        "android.intent.action.DISMISS_ALARM");
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                try {
+                    context.startActivity(intent);
+                    return "已经关掉正在响的闹钟";
+                } catch (Throwable err) {
+                    return "这台手表不支持直接关：" + err.getMessage();
+                }
             }
             if ("http_fetch".equals(name)) {
                 String url = args.optString("url");

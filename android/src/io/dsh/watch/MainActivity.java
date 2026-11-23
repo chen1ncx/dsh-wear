@@ -324,6 +324,19 @@ public class MainActivity extends Activity {
             pairWith(baseUrl, code, true);
             return;
         }
+        int testAlarm = intent.getIntExtra("dshTestAlarm", 0);
+        if (testAlarm > 0) {
+            java.util.Calendar at = java.util.Calendar.getInstance();
+            at.add(java.util.Calendar.SECOND, testAlarm);
+            android.content.Intent alarm = new android.content.Intent(
+                    "android.intent.action.SET_ALARM");
+            alarm.putExtra("android.intent.extra.alarm.HOUR", at.get(java.util.Calendar.HOUR_OF_DAY));
+            alarm.putExtra("android.intent.extra.alarm.MINUTES", at.get(java.util.Calendar.MINUTE));
+            alarm.putExtra("android.intent.extra.alarm.MESSAGE", "测试");
+            alarm.putExtra("android.intent.extra.alarm.SKIP_UI", true);
+            alarm.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(alarm);
+        }
         if (!TextUtils.isEmpty(baseUrl)) prefs.edit().putString("url", baseUrl).apply();
     }
 
