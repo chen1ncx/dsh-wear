@@ -12,6 +12,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import java.util.Locale;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
@@ -3808,10 +3809,27 @@ public class MainActivity extends Activity {
         head.addView(tools, lp(-2, dp(22), 0, 0, 0, 0));
         page.addView(head, fullWidth());
 
+        final TextView autoChip = text(autoApprove() ? "自动审批 ●" : "自动审批 ○", 8,
+                autoApprove() ? C_ACCENT : C_MUTED, true);
+        autoChip.setPadding(dp(8), dp(2), dp(8), dp(2));
+        autoChip.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean next = !autoApprove();
+                setAutoApprove(next);
+                autoChip.setText(next ? "自动审批 ●" : "自动审批 ○");
+                autoChip.setTextColor(next ? C_ACCENT : C_MUTED);
+                toast(next ? "工具调用不再问" : "每次工具调用都会问");
+            }
+        });
         soloStatus = text((soloModel().isEmpty() ? "未选模型" : soloModel())
                 + " · " + soloHostLabel(soloBase()), 8, C_MUTED, false);
         soloStatus.setPadding(dp(10), 0, dp(10), dp(2));
-        page.addView(soloStatus, fullWidth());
+        LinearLayout statusRow = row();
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        statusRow.addView(soloStatus, weight(1));
+        statusRow.addView(autoChip, lp(-2, dp(20), 0, 0, 0, 0));
+        page.addView(statusRow, fullWidth());
 
         soloLog = new LinearLayout(this);
         soloLog.setOrientation(LinearLayout.VERTICAL);
@@ -3855,31 +3873,73 @@ public class MainActivity extends Activity {
     void renderSolo() {
         if (soloLog == null) return;
         soloLog.removeAllViews();
-        JSONObject session = openSession();
-        JSONArray messages = session == null ? null : session.optJSONArray("messages");
+        final JSONObject session = openSession();
+        final JSONArray messages = session == null ? null : session.optJSONArray("messages");
         int count = messages == null ? 0 : messages.length();
         if (count == 0) {
-            TextView empty = text("问点什么吧。这条链路不经过 DSH，手表直接调模型。", 9, C_MUTED, false);
+            TextView empty = text("问点什么吧。表上的工具：时间、计算器、记事本、读写文件。",
+                    9, C_MUTED, false);
             empty.setPadding(dp(4), dp(8), dp(4), 0);
             soloLog.addView(empty, fullWidth());
             return;
         }
         for (int i = 0; i < count; i += 1) {
-            JSONObject item = messages.optJSONObject(i);
+            final JSONObject item = messages.optJSONObject(i);
             if (item == null) continue;
-            boolean mine = "user".equals(item.optString("role"));
+            String role = item.optString("role");
+            if ("tool".equals(role)) continue;
+            final boolean mine = "user".equals(role);
+            final int index = i;
             LinearLayout bubble = new LinearLayout(this);
             bubble.setOrientation(LinearLayout.VERTICAL);
             bubble.setPadding(dp(9), dp(7), dp(9), dp(7));
             bubble.setBackground(bg(mine ? C_CARD_HI : C_CARD, 12));
             bubble.addView(text(mine ? "我" : "模型", 8, mine ? C_BLUE : C_ACCENT, true), fullWidth());
-            TextView bodyText = text(item.optString("content", ""), 10, C_TEXT, false);
-            bodyText.setTextIsSelectable(true);
-            bubble.addView(bodyText, fullWidth());
+
+            final String reason = item.optString("reason", "");
+            final TextView think = text("▸ 思考过程（点开）", 8, C_MUTED, false);
+            if (!reason.isEmpty()) {
+                think.setPadding(0, 0, 0, dp(2));
+                think.setVisibility(reason.isEmpty() ? View.GONE : View.VISIBLE);
+                think.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        if (think.getText().toString().startsWith("▸")) {
+                            think.setText(reason);
+                            think.setTextColor(C_MUTED);
+                        } else {
+                            think.setText("▸ 思考过程（点开）");
+                        }
+                    }
+                });
+                bubble.addView(think, fullWidth());
+            }
+
+            final TextView body = text(item.optString("content", ""), 10, C_TEXT, false);
+            body.setTextIsSelectable(false);
+            bubble.addView(body, fullWidth());
+
+            JSONArray tools = item.optJSONArray("tools");
+            for (int t = 0; tools != null && t < tools.length(); t += 1) {
+                JSONObject card = tools.optJSONObject(t);
+                if (card == null) continue;
+                TextView line = text("· " + card.optString("name") + " " + card.optString("detail"),
+                        8, C_MUTED, false);
+                line.setPadding(0, dp(2), 0, 0);
+                bubble.addView(line, fullWidth());
+            }
+
             LinearLayout wrap = new LinearLayout(this);
             wrap.setOrientation(LinearLayout.VERTICAL);
             wrap.setPadding(0, dp(1), 0, dp(3));
             wrap.addView(bubble, fullWidth());
+            wrap.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    messageMenu(session, item, index, messages, body);
+                    return true;
+                }
+            });
             soloLog.addView(wrap, fullWidth());
         }
         final ScrollView scroll = soloScroll;
@@ -3889,6 +3949,153 @@ public class MainActivity extends Activity {
                 if (scroll != null) scroll.fullScroll(View.FOCUS_DOWN);
             }
         });
+    }
+
+    /** Long press a bubble: copy it, or ask again from here. */
+    void messageMenu(final JSONObject session, final JSONObject item, final int index,
+                     final JSONArray messages, final TextView body) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        box.setBackground(bg(C_CARD_HI, 20));
+        box.addView(dialogHead(dialog, "这一条"), fullWidth());
+
+        Button copy = smallButton("复制", C_CARD);
+        copy.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                android.content.ClipboardManager clipboard =
+                        (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("dsh",
+                        body.getText().toString()));
+                dialog.dismiss();
+                toast("复制好了");
+            }
+        });
+        box.addView(copy, lp(-1, dp(30), 0, dp(4), 0, 0));
+
+        Button again = smallButton("从这里重说", C_ACCENT);
+        again.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                try {
+                    while (messages.length() > index + 1) {
+                        messages.remove(messages.length() - 1);
+                    }
+                    messages.remove(index);
+                    JSONObject reply = new JSONObject();
+                    reply.put("role", "assistant");
+                    reply.put("content", "");
+                    messages.put(reply);
+                    SoloStore.touchSession(prefs, session);
+                    renderSolo();
+                    soloBusy = true;
+                    soloCancelled = false;
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            callSoloApi(session);
+                        }
+                    }).start();
+                } catch (Exception err) {
+                    toast("重说失败 " + err.getMessage());
+                }
+            }
+        });
+        box.addView(again, lp(-1, dp(30), 0, dp(4), 0, 0));
+
+        Button saveAs = smallButton("存成产物", C_BLUE);
+        saveAs.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                saveArtifact(body.getText().toString());
+            }
+        });
+        box.addView(saveAs, lp(-1, dp(30), 0, dp(4), 0, 0));
+
+        dialog.setContentView(box);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.gravity = Gravity.CENTER;
+            window.setAttributes(params);
+        }
+        showPlain(dialog);
+    }
+
+    void saveArtifact(String content) {
+        try {
+            String name = "note-" + new java.text.SimpleDateFormat("MMdd-HHmm", Locale.CHINA)
+                    .format(new java.util.Date()) + ".md";
+            File file = new File(SoloAgent.artifactsDir(this), name);
+            java.io.FileOutputStream out = new java.io.FileOutputStream(file);
+            out.write(content.getBytes("UTF-8"));
+            out.close();
+            toast("存好了：" + name);
+        } catch (Exception err) {
+            toast("存失败 " + err.getMessage());
+        }
+    }
+
+    /** 产物：本机存下来的文件。 */
+    void showArtifacts() {
+        LinearLayout page = secondary("产物");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(6));
+        File[] files = SoloAgent.artifactsDir(this).listFiles();
+        if (files == null || files.length == 0) {
+            TextView empty = text("还没有产物。长按一条回复可以存成产物。", 9, C_MUTED, false);
+            empty.setPadding(dp(10), dp(6), dp(10), 0);
+            body.addView(empty, fullWidth());
+        } else {
+            java.util.Arrays.sort(files, new java.util.Comparator<File>() {
+                @Override
+                public int compare(File a, File b) {
+                    return Long.compare(b.lastModified(), a.lastModified());
+                }
+            });
+            for (final File file : files) {
+                body.addView(pageRow(file.getName(), (file.length() / 1024 + 1) + " KB",
+                        new Runnable() {
+                            public void run() {
+                                showArtifact(file);
+                            }
+                        }), fullWidth());
+            }
+        }
+        page.addView(body, weightV());
+        readingDetail = false;
+        go(page);
+    }
+
+    void showArtifact(File file) {
+        LinearLayout page = secondary(file.getName());
+        TextView content = text("", 10, C_TEXT, false);
+        content.setTextIsSelectable(true);
+        try {
+            java.io.FileInputStream in = new java.io.FileInputStream(file);
+            byte[] buffer = new byte[20000];
+            int n = in.read(buffer);
+            in.close();
+            content.setText(n <= 0 ? "（空文件）" : new String(buffer, 0, n, "UTF-8"));
+        } catch (Exception err) {
+            content.setText("读不出来：" + err.getMessage());
+        }
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        page.addView(scroll, weightV());
+        readingDetail = true;
+        go(page);
     }
 
     void showSoloSay() {
@@ -3983,72 +4190,111 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** One call to /chat/completions; the reply fills the empty bubble. */
+    /** One chat turn, with tool calls and approvals, until the model answers. */
     void callSoloApi(JSONObject session) {
         String error = null;
-        StringBuilder answer = new StringBuilder();
+        String answer = "";
+        String reasoning = "";
+        java.util.List<JSONObject> toolCards = new ArrayList<>();
         HttpURLConnection conn = null;
         try {
             JSONArray messages = session.optJSONArray("messages");
-            JSONArray sent = new JSONArray();
-            for (int i = 0; messages != null && i < messages.length(); i += 1) {
-                JSONObject item = messages.optJSONObject(i);
-                if (item == null) continue;
-                String role = item.optString("role");
-                String content = item.optString("content");
-                if ("assistant".equals(role) && content.isEmpty()) continue;
-                JSONObject out = new JSONObject();
-                out.put("role", role);
-                out.put("content", content);
-                sent.put(out);
-            }
-            JSONObject body = new JSONObject();
-            body.put("model", soloModel());
-            body.put("messages", sent);
-            body.put("stream", true);
+            messageForApi(messages);
 
-            String base = soloBase();
-            if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-            conn = (HttpURLConnection) new URL(base + "/chat/completions").openConnection();
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(20000);
-            conn.setReadTimeout(120000);
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("Authorization", "Bearer " + soloKey);
-            byte[] payload = body.toString().getBytes("UTF-8");
-            conn.setFixedLengthStreamingMode(payload.length);
-            OutputStream out = conn.getOutputStream();
-            out.write(payload);
-            out.close();
+            for (int round = 0; round < 5; round += 1) {
+                if (soloCancelled) break;
+                JSONObject body = new JSONObject();
+                body.put("model", soloModel());
+                body.put("messages", messageForApi(messages));
+                body.put("stream", false);
+                body.put("tools", SoloAgent.tools());
+                body.put("tool_choice", "auto");
 
-            int code = conn.getResponseCode();
-            InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            if (code >= 400) {
-                error = "HTTP " + code + " " + shorten(soloReadAll(stream), 120);
-            } else {
-                java.io.BufferedReader reader = new java.io.BufferedReader(
-                        new java.io.InputStreamReader(stream, "UTF-8"));
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (soloCancelled) break;
-                    if (!line.startsWith("data:")) continue;
-                    String chunk = line.substring(5).trim();
-                    if ("[DONE]".equals(chunk)) break;
-                    try {
-                        JSONObject event = new JSONObject(chunk);
-                        JSONArray choices = event.optJSONArray("choices");
-                        JSONObject first = choices == null ? null : choices.optJSONObject(0);
-                        JSONObject delta = first == null ? null : first.optJSONObject("delta");
-                        String piece = delta == null ? null : delta.optString("content", "");
-                        if (piece != null && !piece.isEmpty()) {
-                            answer.append(piece);
-                            paintSolo(answer.toString());
-                        }
-                    } catch (Exception ignored) {
-                    }
+                String base = soloBase();
+                if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+                conn = (HttpURLConnection) new URL(base + "/chat/completions").openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(20000);
+                conn.setReadTimeout(120000);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Authorization", "Bearer " + soloKey);
+                byte[] payload = body.toString().getBytes("UTF-8");
+                conn.setFixedLengthStreamingMode(payload.length);
+                OutputStream out = conn.getOutputStream();
+                out.write(payload);
+                out.close();
+
+                int code = conn.getResponseCode();
+                InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                String raw = soloReadAll(stream);
+                conn.disconnect();
+                conn = null;
+                if (code >= 400) {
+                    error = "HTTP " + code + " " + shorten(raw, 140);
+                    break;
                 }
-                reader.close();
+                JSONObject root = new JSONObject(raw);
+                JSONArray choices = root.optJSONArray("choices");
+                JSONObject first = choices == null ? null : choices.optJSONObject(0);
+                JSONObject message = first == null ? null : first.optJSONObject("message");
+                if (message == null) {
+                    error = "返回里没有 message";
+                    break;
+                }
+                String piece = message.optString("content", "");
+                String think = message.optString("reasoning_content", "");
+                if (!think.isEmpty()) reasoning = think;
+                if (!piece.isEmpty()) answer = answer.isEmpty() ? piece : answer + "\n" + piece;
+
+                JSONArray calls = message.optJSONArray("tool_calls");
+                if (calls == null || calls.length() == 0) break;
+
+                JSONObject echo = new JSONObject();
+                echo.put("role", "assistant");
+                echo.put("content", piece);
+                echo.put("tool_calls", calls);
+                messages.put(echo);
+
+                for (int i = 0; i < calls.length(); i += 1) {
+                    if (soloCancelled) break;
+                    JSONObject call = calls.optJSONObject(i);
+                    if (call == null) continue;
+                    JSONObject fn = call.optJSONObject("function");
+                    String name = fn == null ? "" : fn.optString("name");
+                    String argsText = fn == null ? "{}" : fn.optString("arguments", "{}");
+                    JSONObject args;
+                    try {
+                        args = new JSONObject(argsText.isEmpty() ? "{}" : argsText);
+                    } catch (Exception bad) {
+                        args = new JSONObject();
+                    }
+                    String detail = SoloAgent.describe(name, args);
+                    if (SoloAgent.needsApproval(name) && !autoApprove()) {
+                        boolean allowed = askApproval(name, detail);
+                        if (!allowed) {
+                            JSONObject refused = new JSONObject();
+                            refused.put("role", "tool");
+                            refused.put("tool_call_id", call.optString("id"));
+                            refused.put("content", "用户拒绝了这次调用");
+                            messages.put(refused);
+                            continue;
+                        }
+                    }
+                    String result = SoloAgent.run(MainActivity.this, name, args);
+                    JSONObject card = new JSONObject();
+                    card.put("name", name);
+                    card.put("detail", detail);
+                    card.put("result", shorten(result, 300));
+                    toolCards.add(card);
+                    JSONObject toolMessage = new JSONObject();
+                    toolMessage.put("role", "tool");
+                    toolMessage.put("tool_call_id", call.optString("id"));
+                    toolMessage.put("content", result);
+                    messages.put(toolMessage);
+                }
+                showToolCards(toolCards);
+                paintSolo("用工具中… " + answer);
             }
         } catch (Throwable err) {
             error = String.valueOf(err.getMessage());
@@ -4057,7 +4303,9 @@ public class MainActivity extends Activity {
         }
 
         final String failed = error;
-        final String text = answer.toString();
+        final String text = answer;
+        final String think = reasoning;
+        final java.util.List<JSONObject> cards = toolCards;
         ui.post(new Runnable() {
             @Override
             public void run() {
@@ -4067,9 +4315,15 @@ public class MainActivity extends Activity {
                 JSONObject tail = last >= 0 ? messages.optJSONObject(last) : null;
                 try {
                     if (tail != null) {
-                        if (failed != null) tail.put("content", "出错了：" + failed);
-                        else if (!text.isEmpty()) tail.put("content", text);
-                        else tail.put("content", "（没有内容返回）");
+                        if (failed != null) {
+                            tail.put("content", "出错了：" + failed);
+                        } else if (!text.isEmpty()) {
+                            tail.put("content", text);
+                            if (!think.isEmpty()) tail.put("reason", think);
+                            tail.put("tools", new JSONArray(cards.toString()));
+                        } else {
+                            tail.put("content", "（没有内容返回）");
+                        }
                     }
                     SoloStore.touchSession(prefs, session);
                 } catch (Exception ignored) {
@@ -4079,7 +4333,129 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** Show the half-finished answer while it streams in. */
+    /** Strip our UI-only keys before sending history to the API. */
+    JSONArray messageForApi(JSONArray messages) {
+        JSONArray sent = new JSONArray();
+        for (int i = 0; messages != null && i < messages.length(); i += 1) {
+            JSONObject item = messages.optJSONObject(i);
+            if (item == null) continue;
+            String role = item.optString("role");
+            String content = item.optString("content");
+            if ("assistant".equals(role) && content.isEmpty()) continue;
+            try {
+                JSONObject out = new JSONObject();
+                out.put("role", role);
+                out.put("content", content);
+                JSONArray calls = item.optJSONArray("tool_calls");
+                if (calls != null) out.put("tool_calls", calls);
+                if (item.has("tool_call_id")) out.put("tool_call_id", item.optString("tool_call_id"));
+                sent.put(out);
+            } catch (Exception ignored) {
+            }
+        }
+        return sent;
+    }
+
+    boolean autoApprove() {
+        return prefs.getBoolean("soloAutoApprove", false);
+    }
+
+    void setAutoApprove(boolean value) {
+        prefs.edit().putBoolean("soloAutoApprove", value).apply();
+    }
+
+    /** Block the worker until the user decides; 5 minutes max. */
+    boolean askApproval(final String name, final String detail) {
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        final boolean[] answer = new boolean[]{false};
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                LinearLayout box = new LinearLayout(MainActivity.this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                box.setPadding(dp(12), dp(10), dp(12), dp(10));
+                box.setBackground(bg(C_CARD_HI, 20));
+                box.addView(text("要用工具：" + name, 11, C_TEXT, true), fullWidth());
+                TextView what = text(detail, 9, C_MUTED, false);
+                what.setPadding(0, dp(4), 0, dp(8));
+                box.addView(what, fullWidth());
+
+                final Dialog dialog = new Dialog(MainActivity.this);
+                dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+                dialog.setCanceledOnTouchOutside(false);
+
+                LinearLayout rowOne = row();
+                Button once = smallButton("允许一次", C_ACCENT);
+                once.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        answer[0] = true;
+                        dialog.dismiss();
+                        latch.countDown();
+                    }
+                });
+                rowOne.addView(once, weightH(32));
+                Button always = smallButton("自动通过", C_BLUE);
+                always.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        setAutoApprove(true);
+                        answer[0] = true;
+                        dialog.dismiss();
+                        latch.countDown();
+                    }
+                });
+                rowOne.addView(always, weightH(32));
+                box.addView(rowOne, lp(-1, dp(32), 0, 0, 0, 0));
+
+                Button deny = smallButton("拒绝", C_RED);
+                deny.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        answer[0] = false;
+                        dialog.dismiss();
+                        latch.countDown();
+                    }
+                });
+                box.addView(deny, lp(-1, dp(30), 0, dp(6), 0, 0));
+
+                dialog.setContentView(box);
+                Window window = dialog.getWindow();
+                if (window != null) {
+                    window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+                    WindowManager.LayoutParams params = window.getAttributes();
+                    params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.94f);
+                    params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+                    params.gravity = Gravity.CENTER;
+                    window.setAttributes(params);
+                }
+                showPlain(dialog);
+            }
+        });
+        try {
+            latch.await(300, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+        }
+        return answer[0];
+    }
+
+    void showToolCards(final java.util.List<JSONObject> cards) {
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                if (soloLog == null || cards.isEmpty()) return;
+                StringBuilder text = new StringBuilder();
+                for (JSONObject card : cards) {
+                    if (text.length() > 0) text.append("\n");
+                    text.append("· ").append(card.optString("name"))
+                            .append(" ").append(card.optString("detail"));
+                }
+                paintSolo(text.toString());
+            }
+        });
+    }
+
+    /** Show the half-finished answer while tools run. */
     void paintSolo(final String partial) {
         ui.post(new Runnable() {
             @Override
@@ -4092,6 +4468,7 @@ public class MainActivity extends Activity {
                 LinearLayout bubble = (LinearLayout) wrap.getChildAt(0);
                 if (bubble.getChildCount() < 2) return;
                 ((TextView) bubble.getChildAt(1)).setText(partial);
+                if (soloScroll != null) soloScroll.fullScroll(View.FOCUS_DOWN);
             }
         });
     }
@@ -4133,24 +4510,13 @@ public class MainActivity extends Activity {
     }
 
     /** Header for standalone screens: title, optional right button, ☰. */
+    /** Header for standalone screens: title and an optional right button. */
     LinearLayout soloHeader(String title, View right) {
         LinearLayout head = row();
         head.setGravity(Gravity.CENTER_VERTICAL);
         head.setPadding(dp(8), dp(6), dp(8), dp(2));
         head.addView(text(title, 12, C_ACCENT, true), weight(1));
-        if (right != null) head.addView(right, lp(dp(48), dp(24), 0, 0, 6, 0));
-        Glyph menu = new Glyph(this, Glyph.MENU);
-        menu.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showColumnPage();
-            }
-        });
-        LinearLayout capsule = row();
-        capsule.setGravity(Gravity.CENTER_VERTICAL);
-        capsule.setBackground(bg(C_CARD, 11));
-        capsule.addView(menu, lp(dp(30), dp(22), 0, 0, 0, 0));
-        head.addView(capsule, lp(-2, dp(22), 0, 0, 0, 0));
+        if (right != null) head.addView(right, lp(dp(48), dp(24), 0, 0, 0, 0));
         return head;
     }
 
@@ -4317,7 +4683,14 @@ public class MainActivity extends Activity {
         refreshSoloConfig();
         LinearLayout page = page();
         page.setPadding(dp(8), dp(6), dp(8), dp(6));
-        page.addView(soloHeader("独立使用设置", null), fullWidth());
+        Button done = smallButton("完成", C_ACCENT);
+        done.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showSoloSessions();
+            }
+        });
+        page.addView(soloHeader("独立使用设置", done), fullWidth());
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
@@ -4455,6 +4828,11 @@ public class MainActivity extends Activity {
         });
         body.addView(save, lp(-1, dp(32), 0, dp(8), 0, 0));
 
+        body.addView(pageRow("产物", "存在表上的文件（长按回复可存）", new Runnable() {
+            public void run() {
+                showArtifacts();
+            }
+        }), fullWidth());
         body.addView(pageRow("切回连接 DSH", "回到远程模式", new Runnable() {
             public void run() {
                 mode = "host";
