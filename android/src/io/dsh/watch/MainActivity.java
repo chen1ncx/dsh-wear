@@ -743,27 +743,29 @@ public class MainActivity extends Activity {
     }
 
     /** Put the conversation content (list or detail) into the middle page. */
-    /** +1 = deeper, -1 = back, 0 = jump (list, mode change). */
-    int navDirection = 1;
+    /** One-shot: +1 = deeper, -1 = back, 0 = jump (no motion). */
+    int navDirection = 0;
 
     void showScreen(View view) {
         if (showing(view)) return;
         conversation.removeAllViews();
         conversation.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        if (navDirection == 0) {
+        int direction = navDirection;
+        navDirection = 0;
+        if (direction == 0) {
             view.setAlpha(1f);
             return;
         }
         // Experimental: the new page slides in from the side it came from and
         // fades in, so "back" reads as a movement instead of a swap.
-        float from = navDirection > 0 ? dp(22) : -dp(26);
+        float from = direction > 0 ? dp(22) : -dp(26);
         view.setTranslationX(from);
         view.setAlpha(0.35f);
         view.animate()
                 .translationX(0f)
                 .alpha(1f)
-                .setDuration(navDirection > 0 ? 170 : 200)
+                .setDuration(direction > 0 ? 170 : 200)
                 .setInterpolator(new android.view.animation.DecelerateInterpolator())
                 .start();
     }
@@ -1447,7 +1449,6 @@ public class MainActivity extends Activity {
             screenList.addView(listEmpty, weightV());
         }
         readingDetail = false;
-        navDirection = 0;
         history.clear();
         showScreen(screenList);
         // Only the fields we actually draw decide a rebuild: the payload carries
@@ -1552,6 +1553,7 @@ public class MainActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     selectedId = null;
+                    navDirection = -1;
                     showList();
                     refreshNow(true);
                 }
@@ -3613,6 +3615,7 @@ public class MainActivity extends Activity {
         }
         if (showing(screenDetail)) {
             selectedId = null;
+            navDirection = -1;
             showList();
             refreshNow(true);
             return;
@@ -3828,6 +3831,7 @@ public class MainActivity extends Activity {
         back.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                navDirection = -1;
                 showSoloSessions();
             }
         });
@@ -5554,6 +5558,7 @@ public class MainActivity extends Activity {
         cancelDoneNote();
         lastPending = -1;
         state = null;
+        navDirection = 1;
         showDetail();
         refreshNow(true);
     }
