@@ -731,6 +731,74 @@ public class MainActivity extends Activity {
     }
 
     /** One step back: the previous page, or the list at the bottom of the stack. */
+    /** Leave the conversation the way it was entered: back into its card. */
+    void zoomBackToList() {
+        final View page = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
+        if (zoomRect == null || page == null || connectionWidth() <= 0) {
+            selectedId = null;
+            navDirection = -1;
+            showList();
+            refreshNow(true);
+            return;
+        }
+        int width = conversation.getWidth();
+        int height = conversation.getHeight();
+        page.setPivotX(width / 2f);
+        page.setPivotY(height / 2f);
+        page.animate()
+                .scaleX(zoomRect.width() / (float) width)
+                .scaleY(zoomRect.height() / (float) height)
+                .translationX(zoomRect.centerX() - conversation.getX() - width / 2f)
+                .translationY(zoomRect.centerY() - conversation.getY() - height / 2f)
+                .alpha(0.6f)
+                .setDuration(navDuration)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                .withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        selectedId = null;
+                        navDirection = 0;
+                        showList();
+                        refreshNow(true);
+                    }
+                })
+                .start();
+    }
+
+    /** Shrink the current page back into the card, then run the switch. */
+    void zoomThen(final Runnable after) {
+        final View page = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
+        int width = conversation.getWidth();
+        int height = conversation.getHeight();
+        if (zoomRect == null || page == null || width <= 0) {
+            after.run();
+            return;
+        }
+        page.setPivotX(width / 2f);
+        page.setPivotY(height / 2f);
+        page.animate()
+                .scaleX(zoomRect.width() / (float) width)
+                .scaleY(zoomRect.height() / (float) height)
+                .translationX(zoomRect.centerX() - conversation.getX() - width / 2f)
+                .translationY(zoomRect.centerY() - conversation.getY() - height / 2f)
+                .alpha(0.55f)
+                .setDuration(navDuration)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                .withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        zoomRect = null;
+                        navDirection = 0;
+                        after.run();
+                    }
+                })
+                .start();
+    }
+
+    int connectionWidth() {
+        return conversation.getWidth();
+    }
+
     void goBack() {
         navDirection = -1;
         View previous = history.poll();
@@ -746,6 +814,8 @@ public class MainActivity extends Activity {
     /** One-shot: +1 = deeper, -1 = back, 0 = jump (no motion). */
     int navDirection = 0;
     int navDuration = 220;
+    /** Where the tapped card was, for the container transform. */
+    android.graphics.Rect zoomRect;
 
     /**
      * Swaps the visible page. Both pages move: the old one slides out and the
@@ -763,6 +833,46 @@ public class MainActivity extends Activity {
         conversation.removeAllViews();
         conversation.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        if (direction > 0 && zoomRect != null && old != null
+                && conversation.getWidth() > 0 && conversation.getHeight() > 0) {
+            float scaleX = zoomRect.width() / (float) conversation.getWidth();
+            float scaleY = zoomRect.height() / (float) conversation.getHeight();
+            float dx = zoomRect.centerX() - conversation.getX()
+                    - conversation.getWidth() / 2f;
+            float dy = zoomRect.centerY() - conversation.getY()
+                    - conversation.getHeight() / 2f;
+            conversation.removeView(old);
+            conversation.addView(old, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            conversation.addView(view, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            view.setPivotX(conversation.getWidth() / 2f);
+            view.setPivotY(conversation.getHeight() / 2f);
+            view.setScaleX(scaleX);
+            view.setScaleY(scaleY);
+            view.setTranslationX(dx);
+            view.setTranslationY(dy);
+            view.setAlpha(0.9f);
+            old.animate().alpha(0f).setDuration(navDuration).start();
+            view.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .translationX(0f)
+                    .translationY(0f)
+                    .alpha(1f)
+                    .setDuration(navDuration)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .withEndAction(new Runnable() {
+                        @Override
+                        public void run() {
+                            conversation.removeView(old);
+                        }
+                    })
+                    .start();
+            zoomRect = null;
+            return;
+        }
 
         if (direction == 0 || old == null || navDuration <= 0) {
             view.setTranslationX(0f);
@@ -1471,6 +1581,10 @@ public class MainActivity extends Activity {
                             bindSessions();
                             return;
                         }
+                        int[] place = new int[2];
+                        view.getLocationOnScreen(place);
+                        zoomRect = new android.graphics.Rect(place[0], place[1],
+                                place[0] + view.getWidth(), place[1] + view.getHeight());
                         openConversation(rows.get(position));
                     }
                 }
@@ -1586,10 +1700,7 @@ public class MainActivity extends Activity {
             back.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    selectedId = null;
-                    navDirection = -1;
-                    showList();
-                    refreshNow(true);
+                    zoomBackToList();
                 }
             });
             head.addView(back);
@@ -3648,10 +3759,7 @@ public class MainActivity extends Activity {
             return;
         }
         if (showing(screenDetail)) {
-            selectedId = null;
-            navDirection = -1;
-            showList();
-            refreshNow(true);
+            zoomBackToList();
             return;
         }
         if (currentScreen() != null && !showing(screenList)) {
@@ -3802,6 +3910,18 @@ public class MainActivity extends Activity {
                     showSoloChat();
                 }
             });
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    int[] place = new int[2];
+                    v.getLocationOnScreen(place);
+                    zoomRect = new android.graphics.Rect(place[0], place[1],
+                            place[0] + v.getWidth(), place[1] + v.getHeight());
+                    soloOpen = id;
+                    prefs.edit().putString("soloOpen", id).apply();
+                    showSoloChat();
+                }
+            });
             row.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
                 public boolean onLongClick(View v) {
@@ -3865,8 +3985,12 @@ public class MainActivity extends Activity {
         back.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                navDirection = -1;
-                showSoloSessions();
+                zoomThen(new Runnable() {
+                    @Override
+                    public void run() {
+                        showSoloSessions();
+                    }
+                });
             }
         });
         head.addView(back, lp(-2, -2, 0, 0, 8, 0));
