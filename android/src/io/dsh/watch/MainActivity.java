@@ -724,6 +724,7 @@ public class MainActivity extends Activity {
 
     /** Navigate to a page, remembering the one it replaces. */
     void go(View page) {
+        navDirection = 1;
         View now = currentScreen();
         if (now != null && now != page && !history.contains(page)) history.push(now);
         showScreen(page);
@@ -731,6 +732,7 @@ public class MainActivity extends Activity {
 
     /** One step back: the previous page, or the list at the bottom of the stack. */
     void goBack() {
+        navDirection = -1;
         View previous = history.poll();
         if (previous != null && previous.getParent() == null) {
             showScreen(previous);
@@ -741,11 +743,29 @@ public class MainActivity extends Activity {
     }
 
     /** Put the conversation content (list or detail) into the middle page. */
+    /** +1 = deeper, -1 = back, 0 = jump (list, mode change). */
+    int navDirection = 1;
+
     void showScreen(View view) {
         if (showing(view)) return;
         conversation.removeAllViews();
         conversation.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (navDirection == 0) {
+            view.setAlpha(1f);
+            return;
+        }
+        // Experimental: the new page slides in from the side it came from and
+        // fades in, so "back" reads as a movement instead of a swap.
+        float from = navDirection > 0 ? dp(22) : -dp(26);
+        view.setTranslationX(from);
+        view.setAlpha(0.35f);
+        view.animate()
+                .translationX(0f)
+                .alpha(1f)
+                .setDuration(navDirection > 0 ? 170 : 200)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
     }
 
     void buildPager() {
@@ -1427,6 +1447,7 @@ public class MainActivity extends Activity {
             screenList.addView(listEmpty, weightV());
         }
         readingDetail = false;
+        navDirection = 0;
         history.clear();
         showScreen(screenList);
         // Only the fields we actually draw decide a rebuild: the payload carries
@@ -3771,6 +3792,7 @@ public class MainActivity extends Activity {
         page.addView(scroll, weightV());
         readingDetail = false;
         history.clear();
+        navDirection = 0;
         showScreen(page);
         soloRootPage = page;
     }
