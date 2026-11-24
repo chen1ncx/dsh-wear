@@ -1105,7 +1105,11 @@ public class MainActivity extends Activity {
     }
 
     /** A tappable line: label, optional hint, and what it opens. */
+    /** Set while building a list whose rows should grow into the next page. */
+    boolean zoomRows;
+
     View pageRow(String label, String hint, final Runnable action) {
+        final boolean capture = zoomRows;
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(12), dp(6), dp(12), dp(7));
@@ -1120,6 +1124,12 @@ public class MainActivity extends Activity {
         box.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (capture) {
+                    int[] place = new int[2];
+                    v.getLocationOnScreen(place);
+                    zoomRect = new android.graphics.Rect(place[0], place[1],
+                            place[0] + v.getWidth(), place[1] + v.getHeight());
+                }
                 action.run();
             }
         });
@@ -3904,6 +3914,7 @@ public class MainActivity extends Activity {
             }
         }), fullWidth());
 
+        zoomRows = true;
         for (int i = 0; i < list.length(); i += 1) {
             final JSONObject item = list.optJSONObject(i);
             if (item == null) continue;
@@ -3913,18 +3924,6 @@ public class MainActivity extends Activity {
             int count = messages == null ? 0 : messages.length();
             View row = pageRow(title, count + " 条消息", new Runnable() {
                 public void run() {
-                    soloOpen = id;
-                    prefs.edit().putString("soloOpen", id).apply();
-                    showSoloChat();
-                }
-            });
-            row.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    int[] place = new int[2];
-                    v.getLocationOnScreen(place);
-                    zoomRect = new android.graphics.Rect(place[0], place[1],
-                            place[0] + v.getWidth(), place[1] + v.getHeight());
                     soloOpen = id;
                     prefs.edit().putString("soloOpen", id).apply();
                     showSoloChat();
@@ -3945,6 +3944,7 @@ public class MainActivity extends Activity {
             });
             body.addView(row, fullWidth());
         }
+        zoomRows = false;
 
         if (list.length() == 0) {
             TextView empty = text("还没有对话。点上面的＋新对话开始。", 9, C_MUTED, false);
