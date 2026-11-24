@@ -745,28 +745,62 @@ public class MainActivity extends Activity {
     /** Put the conversation content (list or detail) into the middle page. */
     /** One-shot: +1 = deeper, -1 = back, 0 = jump (no motion). */
     int navDirection = 0;
+    int navDuration = 220;
 
+    /**
+     * Swaps the visible page. Both pages move: the old one slides out and the
+     * new one slides in from the opposite side, the way the system does it.
+     */
     void showScreen(View view) {
         if (showing(view)) return;
+        int direction = navDirection;
+        navDirection = 0;
+
+        View old = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
+        if (old == view) return;
+        if (old != null) old.animate().cancel();
+        view.animate().cancel();
         conversation.removeAllViews();
         conversation.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        int direction = navDirection;
-        navDirection = 0;
-        if (direction == 0) {
+
+        if (direction == 0 || old == null || navDuration <= 0) {
+            view.setTranslationX(0f);
             view.setAlpha(1f);
             return;
         }
-        // Experimental: the new page slides in from the side it came from and
-        // fades in, so "back" reads as a movement instead of a swap.
-        float from = direction > 0 ? dp(22) : -dp(26);
-        view.setTranslationX(from);
-        view.setAlpha(0.35f);
+
+        int width = conversation.getWidth() > 0
+                ? conversation.getWidth()
+                : getResources().getDisplayMetrics().widthPixels;
+        float shift = width * 0.24f;
+        android.view.animation.Interpolator ease =
+                new android.view.animation.DecelerateInterpolator();
+
+        view.setTranslationX(direction > 0 ? shift : -shift);
+        view.setAlpha(direction > 0 ? 0.55f : 0.75f);
         view.animate()
                 .translationX(0f)
                 .alpha(1f)
-                .setDuration(direction > 0 ? 170 : 200)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .setDuration(navDuration)
+                .setInterpolator(ease)
+                .start();
+
+        // The outgoing page rides on top while it leaves.
+        conversation.addView(old, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        float leave = direction > 0 ? -shift : width;
+        old.animate()
+                .translationX(leave)
+                .alpha(direction > 0 ? 0.6f : 0.0f)
+                .setDuration(navDuration)
+                .setInterpolator(ease)
+                .withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        conversation.removeView(old);
+                    }
+                })
                 .start();
     }
 
