@@ -3814,18 +3814,6 @@ public class MainActivity extends Activity {
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         head.addView(title, weight(1));
-        Glyph menu = new Glyph(this, Glyph.MENU);
-        menu.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showColumnPage();
-            }
-        });
-        LinearLayout tools = row();
-        tools.setGravity(Gravity.CENTER_VERTICAL);
-        tools.setBackground(bg(C_CARD, 11));
-        tools.addView(menu, lp(dp(30), dp(22), 0, 0, 0, 0));
-        head.addView(tools, lp(-2, dp(22), 0, 0, 0, 0));
         page.addView(head, fullWidth());
 
         final TextView autoChip = text(autoApprove() ? "自动审批 ●" : "自动审批 ○", 8,

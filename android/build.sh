@@ -22,7 +22,9 @@ mkdir -p build/gen build/classes build/dex
 echo "[1/6] icon"
 python3 make_icon.py
 
-echo "[2/6] resources"
+VERSION_CODE=$(grep -o 'android:versionCode="[0-9]*"' AndroidManifest.xml | grep -o '[0-9]*')
+VERSION_NAME=$(grep -o 'android:versionName="[^"]*"' AndroidManifest.xml | sed 's/.*="//;s/"//')
+echo "[2/6] resources ($VERSION_CODE $VERSION_NAME)"
 "$AAPT2" compile --dir res -o build/res.zip
 "$AAPT2" link \
   -o build/app.ap_ \
@@ -33,8 +35,8 @@ echo "[2/6] resources"
   --java build/gen \
   --min-sdk-version 21 \
   --target-sdk-version 27 \
-  --version-code 157 \
-  --version-name v2.0_beta
+  --version-code "$VERSION_CODE" \
+  --version-name "$VERSION_NAME"
 
 echo "[3/6] javac"
 find src build/gen -name '*.java' > build/sources.txt
