@@ -734,7 +734,8 @@ public class MainActivity extends Activity {
     /** Leave the conversation the way it was entered: back into its card. */
     void zoomBackToList() {
         final View page = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
-        if (zoomRect == null || page == null || connectionWidth() <= 0) {
+        if (returnRect == null) returnRect = zoomRect;
+        if (returnRect == null || page == null || connectionWidth() <= 0) {
             selectedId = null;
             navDirection = -1;
             showList();
@@ -746,10 +747,10 @@ public class MainActivity extends Activity {
         page.setPivotX(width / 2f);
         page.setPivotY(height / 2f);
         page.animate()
-                .scaleX(zoomRect.width() / (float) width)
-                .scaleY(zoomRect.height() / (float) height)
-                .translationX(zoomRect.centerX() - conversation.getX() - width / 2f)
-                .translationY(zoomRect.centerY() - conversation.getY() - height / 2f)
+                .scaleX(returnRect.width() / (float) width)
+                .scaleY(returnRect.height() / (float) height)
+                .translationX(returnRect.centerX() - conversation.getX() - width / 2f)
+                .translationY(returnRect.centerY() - conversation.getY() - height / 2f)
                 .alpha(0.6f)
                 .setDuration(navDuration)
                 .setInterpolator(new android.view.animation.AccelerateInterpolator())
@@ -758,6 +759,7 @@ public class MainActivity extends Activity {
                     public void run() {
                         selectedId = null;
                         navDirection = 0;
+                        returnRect = null;
                         showList();
                         refreshNow(true);
                     }
@@ -770,17 +772,18 @@ public class MainActivity extends Activity {
         final View page = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
         int width = conversation.getWidth();
         int height = conversation.getHeight();
-        if (zoomRect == null || page == null || width <= 0) {
+        if (returnRect == null) returnRect = zoomRect;
+        if (returnRect == null || page == null || width <= 0) {
             after.run();
             return;
         }
         page.setPivotX(width / 2f);
         page.setPivotY(height / 2f);
         page.animate()
-                .scaleX(zoomRect.width() / (float) width)
-                .scaleY(zoomRect.height() / (float) height)
-                .translationX(zoomRect.centerX() - conversation.getX() - width / 2f)
-                .translationY(zoomRect.centerY() - conversation.getY() - height / 2f)
+                .scaleX(returnRect.width() / (float) width)
+                .scaleY(returnRect.height() / (float) height)
+                .translationX(returnRect.centerX() - conversation.getX() - width / 2f)
+                .translationY(returnRect.centerY() - conversation.getY() - height / 2f)
                 .alpha(0.55f)
                 .setDuration(navDuration)
                 .setInterpolator(new android.view.animation.AccelerateInterpolator())
@@ -788,6 +791,7 @@ public class MainActivity extends Activity {
                     @Override
                     public void run() {
                         zoomRect = null;
+                        returnRect = null;
                         navDirection = 0;
                         after.run();
                     }
@@ -816,6 +820,7 @@ public class MainActivity extends Activity {
     int navDuration = 220;
     /** Where the tapped card was, for the container transform. */
     android.graphics.Rect zoomRect;
+    android.graphics.Rect returnRect;
 
     /**
      * Swaps the visible page. Both pages move: the old one slides out and the
@@ -827,6 +832,8 @@ public class MainActivity extends Activity {
         navDirection = 0;
 
         View old = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
+        Log.i(TAG, "showScreen dir=" + direction + " zoom=" + (zoomRect != null)
+                + " old=" + (old != null) + " w=" + conversation.getWidth());
         if (old == view) return;
         if (old != null) old.animate().cancel();
         view.animate().cancel();
@@ -850,6 +857,7 @@ public class MainActivity extends Activity {
             view.setTranslationX(zoomRect.centerX() - conversation.getX() - width / 2f);
             view.setTranslationY(zoomRect.centerY() - conversation.getY() - height / 2f);
             view.setAlpha(0.85f);
+            returnRect = new android.graphics.Rect(zoomRect);
             zoomRect = null;
             leaving.animate().alpha(0f).setDuration(navDuration).start();
             view.animate()
@@ -1130,6 +1138,7 @@ public class MainActivity extends Activity {
                     zoomRect = new android.graphics.Rect(place[0], place[1],
                             place[0] + v.getWidth(), place[1] + v.getHeight());
                 }
+                Log.i(TAG, "rowClik capture=" + capture + " rect=" + zoomRect);
                 action.run();
             }
         });
@@ -5492,6 +5501,11 @@ public class MainActivity extends Activity {
                         close();
                         return;
                     }
+                    int[] place = new int[2];
+                    v.getLocationOnScreen(place);
+                    zoomRect = new android.graphics.Rect(place[0], place[1],
+                            place[0] + v.getWidth(), place[1] + v.getHeight());
+                    Log.i(TAG, "cardTap rect=" + zoomRect);
                     openConversation(session);
                 }
             });
