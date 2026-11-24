@@ -830,31 +830,28 @@ public class MainActivity extends Activity {
         if (old == view) return;
         if (old != null) old.animate().cancel();
         view.animate().cancel();
-        conversation.removeAllViews();
-        conversation.addView(view, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        FrameLayout.LayoutParams match = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+
+        // Container transform: the chat grows out of the card that was tapped.
         if (direction > 0 && zoomRect != null && old != null
                 && conversation.getWidth() > 0 && conversation.getHeight() > 0) {
-            float scaleX = zoomRect.width() / (float) conversation.getWidth();
-            float scaleY = zoomRect.height() / (float) conversation.getHeight();
-            float dx = zoomRect.centerX() - conversation.getX()
-                    - conversation.getWidth() / 2f;
-            float dy = zoomRect.centerY() - conversation.getY()
-                    - conversation.getHeight() / 2f;
-            conversation.removeView(old);
-            conversation.addView(old, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            conversation.addView(view, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            view.setPivotX(conversation.getWidth() / 2f);
-            view.setPivotY(conversation.getHeight() / 2f);
-            view.setScaleX(scaleX);
-            view.setScaleY(scaleY);
-            view.setTranslationX(dx);
-            view.setTranslationY(dy);
-            view.setAlpha(0.9f);
-            old.animate().alpha(0f).setDuration(navDuration).start();
+            final View leaving = old;
+            conversation.addView(view, match);
+            view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            leaving.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            float width = conversation.getWidth();
+            float height = conversation.getHeight();
+            view.setPivotX(width / 2f);
+            view.setPivotY(height / 2f);
+            view.setScaleX(zoomRect.width() / width);
+            view.setScaleY(zoomRect.height() / height);
+            view.setTranslationX(zoomRect.centerX() - conversation.getX() - width / 2f);
+            view.setTranslationY(zoomRect.centerY() - conversation.getY() - height / 2f);
+            view.setAlpha(0.85f);
+            zoomRect = null;
+            leaving.animate().alpha(0f).setDuration(navDuration).start();
             view.animate()
                     .scaleX(1f)
                     .scaleY(1f)
@@ -866,13 +863,16 @@ public class MainActivity extends Activity {
                     .withEndAction(new Runnable() {
                         @Override
                         public void run() {
-                            conversation.removeView(old);
+                            conversation.removeView(leaving);
+                            view.setLayerType(View.LAYER_TYPE_NONE, null);
                         }
                     })
                     .start();
-            zoomRect = null;
             return;
         }
+
+        conversation.removeAllViews();
+        conversation.addView(view, match);
 
         if (direction == 0 || old == null || navDuration <= 0) {
             view.setTranslationX(0f);
@@ -887,6 +887,7 @@ public class MainActivity extends Activity {
         android.view.animation.Interpolator ease =
                 new android.view.animation.DecelerateInterpolator();
 
+        view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         view.setTranslationX(direction > 0 ? shift : -shift);
         view.setAlpha(direction > 0 ? 0.55f : 0.75f);
         view.animate()
@@ -894,13 +895,19 @@ public class MainActivity extends Activity {
                 .alpha(1f)
                 .setDuration(navDuration)
                 .setInterpolator(ease)
+                .withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        view.setLayerType(View.LAYER_TYPE_NONE, null);
+                    }
+                })
                 .start();
 
-        // The outgoing page rides on top while it leaves.
-        conversation.addView(old, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        final View outgoing = old;
+        conversation.addView(outgoing, match);
+        outgoing.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         float leave = direction > 0 ? -shift : width;
-        old.animate()
+        outgoing.animate()
                 .translationX(leave)
                 .alpha(direction > 0 ? 0.6f : 0.0f)
                 .setDuration(navDuration)
@@ -908,7 +915,8 @@ public class MainActivity extends Activity {
                 .withEndAction(new Runnable() {
                     @Override
                     public void run() {
-                        conversation.removeView(old);
+                        conversation.removeView(outgoing);
+                        outgoing.setLayerType(View.LAYER_TYPE_NONE, null);
                     }
                 })
                 .start();
