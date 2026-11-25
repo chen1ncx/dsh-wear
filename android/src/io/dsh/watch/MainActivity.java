@@ -221,7 +221,7 @@ public class MainActivity extends Activity {
     EditText pairCode;
     TextView pairStatus;
     TextView listStatus;
-    LoadingDots listDots;
+    View listDots;
     LinearLayout listLoading;
 
     // ============================================================ lifecycle
@@ -1719,12 +1719,12 @@ public class MainActivity extends Activity {
             LinearLayout loading = new LinearLayout(this);
             loading.setOrientation(LinearLayout.VERTICAL);
             loading.setGravity(Gravity.CENTER);
-            listDots = new LoadingDots(this, C_MUTED, 2.6f, 3.4f);
-            loading.addView(listDots, lp(-2, -2, 0, 0, 0, 0));
             TextView wait = text("读取中", 9, C_MUTED, false);
             wait.setGravity(Gravity.CENTER);
-            wait.setPadding(0, dp(4), 0, 0);
+            wait.setPadding(0, 0, 0, dp(6));
             loading.addView(wait, fullWidth());
+            listDots = null;
+            loading.addView(new LoadingSpinner(this, C_MUTED, 18f, 2f), lp(-2, -2, 0, 0, 0, 0));
             listLoading = loading;
             loading.setVisibility(View.GONE);
             screenList.addView(listLoading, weightV());
@@ -1887,11 +1887,11 @@ public class MainActivity extends Activity {
                 loading.setOrientation(LinearLayout.VERTICAL);
                 loading.setGravity(Gravity.CENTER);
                 loading.setPadding(0, dp(16), 0, 0);
-                loading.addView(new LoadingDots(this, C_MUTED, 2.6f, 3.4f), lp(-2, -2, 0, 0, 0, 0));
                 TextView wait = text("读取中", 9, C_MUTED, false);
                 wait.setGravity(Gravity.CENTER);
-                wait.setPadding(0, dp(4), 0, 0);
+                wait.setPadding(0, 0, 0, dp(6));
                 loading.addView(wait, fullWidth());
+                loading.addView(new LoadingSpinner(this, C_MUTED, 18f, 2f), lp(-2, -2, 0, 0, 0, 0));
                 detailBox.addView(loading, fullWidth());
             } else {
                 detailBox.addView(note(lastError));

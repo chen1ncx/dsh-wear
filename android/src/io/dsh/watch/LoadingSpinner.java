@@ -4,27 +4,28 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.RectF;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 
-/**
- * Three dots that light up in turn. Small, cheap to draw, and it reads better
- * than a spinner on a round watch screen.
- */
-final class LoadingDots extends View {
+/** A thin arc that keeps turning, drawn by hand so it matches the watch palette. */
+final class LoadingSpinner extends View {
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final float radius;
-    private final float gap;
-    private int phase;
+    private final RectF box = new RectF();
+    private final float stroke;
+    private float angle;
     private ValueAnimator animator;
 
-    LoadingDots(Context context, int color, float radiusDp, float gapDp) {
+    LoadingSpinner(Context context, int color, float sizeDp, float strokeDp) {
         super(context);
         float density = context.getResources().getDisplayMetrics().density;
-        radius = Math.max(1.4f, radiusDp * density);
-        gap = gapDp * density;
+        stroke = Math.max(1.2f, strokeDp * density);
+        box.set(stroke, stroke, sizeDp * density - stroke, sizeDp * density - stroke);
         paint.setColor(color);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(stroke);
+        paint.setStrokeCap(Paint.Cap.ROUND);
     }
 
     @Override
@@ -47,14 +48,14 @@ final class LoadingDots extends View {
 
     void start() {
         if (animator != null && animator.isRunning()) return;
-        animator = ValueAnimator.ofInt(0, 2);
-        animator.setDuration(900);
+        animator = ValueAnimator.ofFloat(0f, 360f);
+        animator.setDuration(800);
         animator.setRepeatCount(ValueAnimator.INFINITE);
         animator.setInterpolator(new LinearInterpolator());
         animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
-                phase = (int) animation.getAnimatedValue();
+                angle = (float) animation.getAnimatedValue();
                 invalidate();
             }
         });
@@ -70,19 +71,15 @@ final class LoadingDots extends View {
 
     @Override
     protected void onMeasure(int widthSpec, int heightSpec) {
-        int width = (int) (radius * 6 + gap * 2);
-        int height = (int) (radius * 2);
-        setMeasuredDimension(resolveSize(width, widthSpec), resolveSize(height, heightSpec));
+        int size = (int) Math.ceil(box.width() + stroke * 2);
+        setMeasuredDimension(resolveSize(size, widthSpec), resolveSize(size, heightSpec));
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
-        float y = getHeight() / 2f;
-        float startX = (getWidth() - (radius * 6 + gap * 2)) / 2f + radius;
-        for (int i = 0; i < 3; i += 1) {
-            float alpha = i == phase ? 1f : (i == (phase + 2) % 3 ? 0.35f : 0.6f);
-            paint.setAlpha((int) (255 * alpha));
-            canvas.drawCircle(startX + i * (radius * 2 + gap), y, radius, paint);
-        }
+        canvas.save();
+        canvas.rotate(angle, getWidth() / 2f, getHeight() / 2f);
+        canvas.drawArc(box, -90f, 240f, false, paint);
+        canvas.restore();
     }
 }
