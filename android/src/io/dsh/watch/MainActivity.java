@@ -130,7 +130,6 @@ public class MainActivity extends Activity {
     }
 
     void applyTheme(int index) {
-        Log.i(TAG, "applyTheme " + index);
         int[] t = THEMES[Math.floorMod(index, THEMES.length)];
         C_BG = t[0];
         C_CARD = t[1];
@@ -146,7 +145,6 @@ public class MainActivity extends Activity {
         C_LINE = 0xFF49454F;
         C_EDGE = (C_CARD_HI & 0x00FFFFFF) | 0xFF000000;
         C_EDGE = blend(C_CARD, 0xFFFFFFFF, 0.16f);
-        Log.i(TAG, "  bg=" + Integer.toHexString(C_BG) + " accent=" + Integer.toHexString(C_ACCENT));
     }
 
     static final String PREFS = "dshwatch";
@@ -261,7 +259,6 @@ public class MainActivity extends Activity {
 
             applyLaunchConfig(getIntent());
             if (TextUtils.isEmpty(baseUrl)) baseUrl = readConfigUrl();
-            Log.i(TAG, "onCreate token=" + (token != null) + " url=" + baseUrl);
             if (!TextUtils.isEmpty(token) && !TextUtils.isEmpty(baseUrl)) {
                 // Heal the switcher list on every launch.
                 rememberServer(baseUrl, token, "");
@@ -330,19 +327,6 @@ public class MainActivity extends Activity {
         if (!TextUtils.isEmpty(url) && !TextUtils.isEmpty(code)) {
             pairWith(baseUrl, code, true);
             return;
-        }
-        int testAlarm = intent.getIntExtra("dshTestAlarm", 0);
-        if (testAlarm > 0) {
-            java.util.Calendar at = java.util.Calendar.getInstance();
-            at.add(java.util.Calendar.SECOND, testAlarm);
-            android.content.Intent alarm = new android.content.Intent(
-                    "android.intent.action.SET_ALARM");
-            alarm.putExtra("android.intent.extra.alarm.HOUR", at.get(java.util.Calendar.HOUR_OF_DAY));
-            alarm.putExtra("android.intent.extra.alarm.MINUTES", at.get(java.util.Calendar.MINUTE));
-            alarm.putExtra("android.intent.extra.alarm.MESSAGE", "测试");
-            alarm.putExtra("android.intent.extra.alarm.SKIP_UI", true);
-            alarm.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(alarm);
         }
         if (!TextUtils.isEmpty(baseUrl)) prefs.edit().putString("url", baseUrl).apply();
     }
@@ -1564,7 +1548,6 @@ public class MainActivity extends Activity {
     }
 
     void buildPairPage(String message) {
-        Log.i(TAG, "buildPairPage bg=" + Integer.toHexString(C_BG));
         if (screenPair == null) {
             screenPair = page();
             pairScroll = new ScrollView(this);
@@ -1716,7 +1699,6 @@ public class MainActivity extends Activity {
         }
         selectedId = null;
         if (screenList == null) {
-            Log.i(TAG, "buildList bg=" + Integer.toHexString(C_BG));
             screenList = page();
 
             // Two components only: one capsule for the host, one for the tools.
@@ -3742,7 +3724,6 @@ public class MainActivity extends Activity {
     }
 
     void forgetServer(String url) {
-        Log.i(TAG, "forget server " + url);
         try {
             JSONArray list = new JSONArray(serverList());
             JSONArray next = new JSONArray();
@@ -3879,7 +3860,6 @@ public class MainActivity extends Activity {
                         toast("当前连接不能删，先切到别的");
                         return true;
                     }
-                    Log.i(TAG, "long-press server " + url);
                     pendingDelete = url;
                     dialog.dismiss();
                     showDevicesDialog();
@@ -3991,7 +3971,6 @@ public class MainActivity extends Activity {
     }
 
     void selectTheme(int index) {
-        Log.i(TAG, "selectTheme " + index);
         prefs.edit().putInt("theme", index).apply();
         prefs.edit().putBoolean("glass", false).apply();
         glass = false;

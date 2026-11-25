@@ -49,7 +49,6 @@ final class SoloConfig {
         if (socket == null || socket.isClosed()) {
             try {
                 socket = new ServerSocket(PORT);
-                Log.i(TAG, "solo server bound on " + PORT);
                 thread = new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -100,7 +99,6 @@ final class SoloConfig {
             Socket client = null;
             try {
                 client = socket.accept();
-                Log.i(TAG, "solo server accepted");
                 final Socket opened = client;
                 client.setSoTimeout(8000);
                 Thread worker = new Thread(new Runnable() {
@@ -108,7 +106,6 @@ final class SoloConfig {
                     public void run() {
                         try {
                             handle(context, opened);
-                            Log.i(TAG, "solo server handled");
                         } catch (Throwable boom) {
                             Log.w(TAG, "solo handle failed", boom);
                         } finally {
@@ -131,7 +128,6 @@ final class SoloConfig {
     }
 
     private static void handle(Context context, Socket client) throws Exception {
-        Log.i(TAG, "solo handle start");
         InputStream in = client.getInputStream();
         ByteArrayOutputStream head = new ByteArrayOutputStream();
         byte[] chunk = new byte[2048];
@@ -182,7 +178,6 @@ final class SoloConfig {
         }
         String body = new String(bodyBytes, 0, filled, "UTF-8");
 
-        Log.i(TAG, "solo " + method + " " + path + " len=" + length);
         if ("POST".equals(method) && path.startsWith("/save")) {
             SharedPreferences prefs = context.getSharedPreferences("dshwatch", Context.MODE_PRIVATE);
             String base = "";
@@ -374,7 +369,6 @@ final class SoloConfig {
 
     private static void respond(Socket client, int code, String html) throws Exception {
         byte[] bytes = html.getBytes("UTF-8");
-        Log.i(TAG, "solo respond " + code + " bytes=" + bytes.length);
         String head = "HTTP/1.1 " + code + " " + (code == 200 ? "OK" : "ERR") + "\r\n"
                 + "Content-Type: text/html; charset=utf-8\r\n"
                 + "Content-Length: " + bytes.length + "\r\n"
