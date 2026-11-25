@@ -1315,21 +1315,55 @@ public class MainActivity extends Activity {
         });
     }
 
+    View themePageView;
+
     void showThemePage() {
         LinearLayout page = secondary("主题色");
-        page.addView(themeGrid(), fullWidth());
-        boolean on = prefs.getBoolean("glass", false);
-        page.addView(pageRow("玻璃质感 " + (on ? "●" : "○"),
-                "半透明卡片，像 iOS 那种", new Runnable() {
-                    public void run() {
-                        boolean next = !prefs.getBoolean("glass", false);
-                        prefs.edit().putBoolean("glass", next).apply();
-                        glass = next;
-                        selectTheme(prefs.getInt("theme", 0));
-                        showThemePage();
-                    }
-                }), fullWidth());
+        if (prefs.getBoolean("glass", false)) {
+            TextView note = text("玻璃质感已开启，八套配色先不生效", 9, C_MUTED, false);
+            note.setGravity(Gravity.CENTER);
+            note.setPadding(0, dp(6), 0, dp(6));
+            page.addView(note, fullWidth());
+        } else {
+            page.addView(themeGrid(), fullWidth());
+        }
+        LinearLayout glassRow = row();
+        glassRow.setGravity(Gravity.CENTER_VERTICAL);
+        glassRow.setPadding(dp(12), dp(8), dp(12), dp(8));
+        glassRow.setBackground(bg(C_CARD, 14));
+        LinearLayout glassText = new LinearLayout(this);
+        glassText.setOrientation(LinearLayout.VERTICAL);
+        glassText.addView(text("玻璃质感", 11, C_TEXT, false), fullWidth());
+        glassText.addView(text("半透明卡片，像 iOS 那种", 8, C_MUTED, false), fullWidth());
+        glassRow.addView(glassText, weight(1));
+        final Toggle glassSwitch = new Toggle(this);
+        glassSwitch.setColors(C_ACCENT, C_CARD_HI, C_BG, C_MUTED);
+        glassSwitch.setOn(prefs.getBoolean("glass", false));
+        glassSwitch.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean next = !glassSwitch.isOn();
+                glassSwitch.setOn(next);
+                prefs.edit().putBoolean("glass", next).apply();
+                glass = next;
+                dropScreens();
+                showThemePage();
+            }
+        });
+        glassRow.addView(glassSwitch, lp(dp(44), dp(24), 8, 0, 0, 0));
+
+        LinearLayout wrapGlass = new LinearLayout(this);
+        wrapGlass.setOrientation(LinearLayout.VERTICAL);
+        wrapGlass.setPadding(0, dp(2), 0, dp(3));
+        wrapGlass.addView(glassRow, fullWidth());
+        page.addView(wrapGlass, fullWidth());
         readingDetail = false;
+        themePageView = page;
+        if (showing(page)) return;
+        if (currentScreen() != null && currentScreen() == themePageView) {
+            showScreen(page);
+            return;
+        }
         go(page);
     }
 
@@ -3918,16 +3952,8 @@ public class MainActivity extends Activity {
         };
     }
 
-    void selectTheme(int index) {
-        Log.i(TAG, "selectTheme " + index);
-        prefs.edit().putInt("theme", index).apply();
-        glass = prefs.getBoolean("glass", false);
-        applyTheme(index);
-        root.setBackgroundColor(C_BG);
-        if (conversation != null) conversation.setBackgroundColor(C_BG);
-
-        // Everything was drawn with the old palette: drop the cached views and
-        // redraw the list. No pager, no exit page - they no longer exist.
+    /** Forget every cached page: they were drawn with the old palette. */
+    void dropScreens() {
         screenList = null;
         screenDetail = null;
         screenPair = null;
@@ -3937,6 +3963,19 @@ public class MainActivity extends Activity {
         pairUrl = null;
         pairCode = null;
         pairStatus = null;
+    }
+
+    void selectTheme(int index) {
+        Log.i(TAG, "selectTheme " + index);
+        prefs.edit().putInt("theme", index).apply();
+        prefs.edit().putBoolean("glass", false).apply();
+        glass = false;
+        glass = prefs.getBoolean("glass", false);
+        applyTheme(index);
+        root.setBackgroundColor(C_BG);
+        if (conversation != null) conversation.setBackgroundColor(C_BG);
+
+        dropScreens();
         history.clear();
         if (conversation != null) conversation.removeAllViews();
         showList();
