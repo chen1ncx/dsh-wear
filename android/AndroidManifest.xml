@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.dsh.watch"
-    android:versionCode="191"
+    android:versionCode="192"
     android:versionName="v2.0_beta">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="27" />

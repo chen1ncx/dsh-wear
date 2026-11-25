@@ -4975,6 +4975,7 @@ public class MainActivity extends Activity {
                         mode = "host";
                         saveSoloConfig();
                         history.clear();
+                        navDirection = 1;
                         showList();
                     }
                 }), fullWidth());
@@ -4984,6 +4985,7 @@ public class MainActivity extends Activity {
                         mode = "solo";
                         saveSoloConfig();
                         history.clear();
+                        navDirection = 1;
                         showSoloSessions();
                     }
                 }), fullWidth());
