@@ -310,6 +310,11 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         scheduleTick(300);
+        // Coming back from the system accessibility page: refresh the dot.
+        if (configPageView != null && showing(configPageView)
+                && WatchAcc.ready() != accReady) {
+            showSoloConfig(null);
+        }
     }
 
     @Override
@@ -4059,13 +4064,16 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             if (configPageView == null || !showing(configPageView)) return;
-            if (soloConfigSig() != configSig) {
+            if (soloConfigSig() != configSig || WatchAcc.ready() != accReady) {
                 showSoloConfig(null);
                 return;
             }
-            ui.postDelayed(this, 1200);
+            ui.postDelayed(this, 700);
         }
     };
+
+    /** Gate the accessibility row's dot so it flips the moment the user comes back. */
+    boolean accReady;
 
     int soloConfigSig() {
         String base = prefs.getString("soloBase", "");
@@ -5345,8 +5353,9 @@ public class MainActivity extends Activity {
                 showParams();
             }
         }), fullWidth());
-        body.addView(pageRow("无障碍权限 " + (WatchAcc.ready() ? "●" : "○"),
-                WatchAcc.ready() ? "已开启，能点屏幕、开应用"
+        accReady = WatchAcc.ready();
+        body.addView(pageRow("无障碍权限 " + (accReady ? "●" : "○"),
+                accReady ? "已开启，能点屏幕、开应用"
                         : "开启后 Agent 才能点屏幕、开应用", new Runnable() {
                     public void run() {
                         try {
@@ -5396,7 +5405,7 @@ public class MainActivity extends Activity {
         configPageView = page;
         configSig = soloConfigSig();
         ui.removeCallbacks(configWatch);
-        ui.postDelayed(configWatch, 1200);
+        ui.postDelayed(configWatch, 600);
     }
 
     /** Pull the values the phone page may have written while this page was open. */
