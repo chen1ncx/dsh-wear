@@ -5345,6 +5345,19 @@ public class MainActivity extends Activity {
                 showParams();
             }
         }), fullWidth());
+        body.addView(pageRow("无障碍权限 " + (WatchAcc.ready() ? "●" : "○"),
+                WatchAcc.ready() ? "已开启，能点屏幕、开应用"
+                        : "开启后 Agent 才能点屏幕、开应用", new Runnable() {
+                    public void run() {
+                        try {
+                            startActivity(new Intent(android.provider.Settings
+                                    .ACTION_ACCESSIBILITY_SETTINGS));
+                            toast("找到 DSH on wear 屏幕操作，打开它");
+                        } catch (Exception no) {
+                            toast("打不开设置：" + no);
+                        }
+                    }
+                }), fullWidth());
         body.addView(pageRow("产物", "存在表上的文件（长按回复可存）", new Runnable() {
             public void run() {
                 showArtifacts();
