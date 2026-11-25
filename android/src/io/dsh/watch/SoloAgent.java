@@ -29,6 +29,25 @@ final class SoloAgent {
     static JSONArray tools() {
         JSONArray list = new JSONArray();
         try {
+            list.put(tool("ui_screen", "读当前屏幕上的文字和可点位置（需要无障碍开启）",
+                    new JSONObject().put("type", "object").put("properties", new JSONObject())));
+            list.put(tool("ui_tap", "按文字点屏幕上的控件，或按坐标点（需要无障碍）",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("text", new JSONObject().put("type", "string")
+                                            .put("description", "控件上的文字，优先用这个"))
+                                    .put("x", new JSONObject().put("type", "integer"))
+                                    .put("y", new JSONObject().put("type", "integer")))));
+            list.put(tool("ui_key", "按系统键：back / home / recents / notifications（需要无障碍）",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("key", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("key"))));
+            list.put(tool("open_app", "打开手表上装的应用（按包名或名称）",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("app", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("app"))));
             list.put(tool("now", "当前日期和时间",
                     new JSONObject().put("type", "object").put("properties", new JSONObject())));
             list.put(tool("calc", "算一个算式，只支持数字和 + - * / ( )",
@@ -142,6 +161,26 @@ final class SoloAgent {
 
     static String run(Context context, String name, JSONObject args) {
         try {
+            if ("ui_screen".equals(name)) {
+                return WatchAcc.dump();
+            }
+            if ("ui_tap".equals(name)) {
+                String text = args.optString("text", "");
+                if (!text.isEmpty()) return WatchAcc.tapText(text);
+                int x = args.optInt("x", -1);
+                int y = args.optInt("y", -1);
+                if (x < 0 || y < 0) return "要给我 text 或者 x、y";
+                return WatchAcc.tap(x, y) ? "点了 " + x + "," + y : "点不到（无障碍没开？）";
+            }
+            if ("ui_key".equals(name)) {
+                String key = args.optString("key", "back").toLowerCase(Locale.US);
+                int code = "home".equals(key) ? 2 : "recents".equals(key) ? 3
+                        : "notifications".equals(key) ? 4 : 1;
+                return WatchAcc.key(code) ? "按了 " + key : "按不了（无障碍没开？）";
+            }
+            if ("open_app".equals(name)) {
+                return openApp(context, args.optString("app", ""));
+            }
             if ("now".equals(name)) {
                 SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm EEEE",
                         Locale.CHINA);
@@ -396,5 +435,38 @@ final class SoloAgent {
         private void skip() {
             while (at < text.length() && Character.isWhitespace(text.charAt(at))) at += 1;
         }
+    }
+
+    /** Launch by package name, else by a name that contains the query. */
+    static String openApp(Context context, String query) {
+        if (query == null || query.trim().isEmpty()) return "要给我应用名或包名";
+        String want = query.trim().toLowerCase(Locale.US);
+        android.content.pm.PackageManager pm = context.getPackageManager();
+        try {
+            android.content.Intent direct = pm.getLaunchIntentForPackage(want);
+            if (direct != null) {
+                direct.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(direct);
+                return "打开 " + want;
+            }
+        } catch (Exception ignored) {
+        }
+        java.util.List<android.content.pm.ApplicationInfo> apps =
+                pm.getInstalledApplications(android.content.pm.PackageManager.GET_META_DATA);
+        for (android.content.pm.ApplicationInfo info : apps) {
+            String label = String.valueOf(pm.getApplicationLabel(info)).toLowerCase(Locale.US);
+            String pkg = info.packageName.toLowerCase(Locale.US);
+            if (!label.contains(want) && !pkg.contains(want)) continue;
+            android.content.Intent intent = pm.getLaunchIntentForPackage(info.packageName);
+            if (intent == null) continue;
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                context.startActivity(intent);
+                return "打开 " + pm.getApplicationLabel(info);
+            } catch (Exception no) {
+                return "打不开 " + info.packageName + "：" + no;
+            }
+        }
+        return "没找到「" + query + "」，可以先 ui_screen 看看桌面上有什么";
     }
 }

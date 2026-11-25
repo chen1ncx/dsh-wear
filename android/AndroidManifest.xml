@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.dsh.watch"
-    android:versionCode="204"
+    android:versionCode="206"
     android:versionName="v2.0_beta">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="27" />
@@ -29,6 +29,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".WatchAcc"
+            android:exported="false"
+            android:label="@string/acc_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
     </application>
 </manifest>
