@@ -1417,6 +1417,9 @@ public class MainActivity extends Activity {
             version = "?";
         }
         LinearLayout page = secondary("关于");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(8));
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.mipmap.ic_launcher);
@@ -1425,41 +1428,42 @@ public class MainActivity extends Activity {
         iconRow.setGravity(Gravity.CENTER);
         iconRow.setPadding(0, dp(6), 0, dp(4));
         iconRow.addView(icon, lp(dp(54), dp(54), 0, 0, 0, 0));
-        page.addView(iconRow, fullWidth());
+        body.addView(iconRow, fullWidth());
 
         TextView name = text("DSH on wear", 14, C_ACCENT, true);
         name.setGravity(Gravity.CENTER);
         name.setPadding(dp(8), dp(2), dp(8), 0);
-        page.addView(name, fullWidth());
+        body.addView(name, fullWidth());
         TextView ver = text("版本 " + version, 9, C_MUTED, false);
         ver.setGravity(Gravity.CENTER);
         ver.setPadding(dp(8), dp(1), dp(8), 0);
-        page.addView(ver, fullWidth());
+        body.addView(ver, fullWidth());
         TextView note = text("在手表上看 DSH 在做什么、回话、审批、换模型。", 9, C_TEXT, false);
         note.setGravity(Gravity.CENTER);
         note.setPadding(dp(8), dp(9), dp(8), 0);
-        page.addView(note, fullWidth());
+        body.addView(note, fullWidth());
         TextView ai = text("界面与代码由 AI 生成", 8, C_MUTED, false);
         ai.setGravity(Gravity.CENTER);
         ai.setPadding(dp(8), dp(6), dp(8), 0);
-        page.addView(ai, fullWidth());
+        body.addView(ai, fullWidth());
 
         TextView dev = text("开发者：", 9, C_MUTED, false);
         dev.setGravity(Gravity.CENTER);
         dev.setPadding(dp(8), dp(12), dp(8), 0);
-        page.addView(dev, fullWidth());
+        body.addView(dev, fullWidth());
         TextView devName = text("YukioZola@0o0社区 · 0o0.site", 9, C_TEXT, false);
         devName.setGravity(Gravity.CENTER);
         devName.setPadding(dp(8), dp(1), dp(8), 0);
-        page.addView(devName, fullWidth());
+        body.addView(devName, fullWidth());
         TextView thanks = text("@DeepSeek Harness", 8, C_MUTED, false);
         thanks.setGravity(Gravity.CENTER);
         thanks.setPadding(dp(8), dp(3), dp(8), 0);
-        page.addView(thanks, fullWidth());
+        body.addView(thanks, fullWidth());
         TextView repo = text("github.com/chen1ncx/dsh-wear", 8, C_BLUE, false);
         repo.setGravity(Gravity.CENTER);
         repo.setPadding(dp(8), dp(10), dp(8), dp(6));
-        page.addView(repo, fullWidth());
+        body.addView(repo, fullWidth());
+        scrollInto(page, body);
         readingDetail = false;
         go(page);
     }
