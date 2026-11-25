@@ -1719,6 +1719,7 @@ public class MainActivity extends Activity {
             LinearLayout loading = new LinearLayout(this);
             loading.setOrientation(LinearLayout.VERTICAL);
             loading.setGravity(Gravity.CENTER);
+            loading.setPadding(0, 0, 0, dp(46));
             TextView wait = text("读取中", 9, C_MUTED, false);
             wait.setGravity(Gravity.CENTER);
             wait.setPadding(0, 0, 0, dp(6));
@@ -1886,7 +1887,7 @@ public class MainActivity extends Activity {
                 LinearLayout loading = new LinearLayout(this);
                 loading.setOrientation(LinearLayout.VERTICAL);
                 loading.setGravity(Gravity.CENTER);
-                loading.setPadding(0, dp(16), 0, 0);
+                loading.setPadding(0, 0, 0, dp(52));
                 TextView wait = text("读取中", 9, C_MUTED, false);
                 wait.setGravity(Gravity.CENTER);
                 wait.setPadding(0, 0, 0, dp(6));
