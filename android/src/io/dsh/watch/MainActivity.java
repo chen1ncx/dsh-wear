@@ -221,6 +221,8 @@ public class MainActivity extends Activity {
     EditText pairCode;
     TextView pairStatus;
     TextView listStatus;
+    LoadingDots listDots;
+    LinearLayout listLoading;
 
     // ============================================================ lifecycle
 
@@ -1713,6 +1715,19 @@ public class MainActivity extends Activity {
             listEmpty.setGravity(Gravity.CENTER);
             listEmpty.setPadding(dp(16), 0, dp(16), dp(24));
             listEmpty.setVisibility(View.GONE);
+
+            LinearLayout loading = new LinearLayout(this);
+            loading.setOrientation(LinearLayout.VERTICAL);
+            loading.setGravity(Gravity.CENTER);
+            listDots = new LoadingDots(this, C_MUTED, 2.6f, 3.4f);
+            loading.addView(listDots, lp(-2, -2, 0, 0, 0, 0));
+            TextView wait = text("读取中", 9, C_MUTED, false);
+            wait.setGravity(Gravity.CENTER);
+            wait.setPadding(0, dp(4), 0, 0);
+            loading.addView(wait, fullWidth());
+            listLoading = loading;
+            loading.setVisibility(View.GONE);
+            screenList.addView(listLoading, weightV());
             screenList.addView(listEmpty, weightV());
         }
         readingDetail = false;
@@ -1780,13 +1795,17 @@ public class MainActivity extends Activity {
         if (listEmpty != null) {
             boolean empty = rows.isEmpty();
             listView.setVisibility(empty ? View.GONE : View.VISIBLE);
-            listEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
+            boolean waiting = empty && !gotState && lastError.isEmpty();
+            if (listLoading != null) {
+                listLoading.setVisibility(waiting ? View.VISIBLE : View.GONE);
+            }
+            listEmpty.setVisibility(empty && !waiting ? View.VISIBLE : View.GONE);
             if (empty) {
                 String host = shortHost(baseUrl == null ? "" : baseUrl);
                 if (!lastError.isEmpty()) {
                     listEmpty.setText("连不上这台\n" + host + "\n在「设备」里换一台\n或在配对页里重新配对");
                 } else if (!gotState) {
-                    listEmpty.setText("读取中…");
+                    listEmpty.setText("");
                 } else {
                     listEmpty.setText("这台还没有对话\n点 ＋ 新建一个");
                 }
@@ -1863,7 +1882,20 @@ public class MainActivity extends Activity {
         if (session == null) {
             detailBox.removeAllViews();
             detailTitle.setText("…");
-            detailBox.addView(note(lastError.isEmpty() ? "读取中…" : lastError));
+            if (lastError.isEmpty()) {
+                LinearLayout loading = new LinearLayout(this);
+                loading.setOrientation(LinearLayout.VERTICAL);
+                loading.setGravity(Gravity.CENTER);
+                loading.setPadding(0, dp(16), 0, 0);
+                loading.addView(new LoadingDots(this, C_MUTED, 2.6f, 3.4f), lp(-2, -2, 0, 0, 0, 0));
+                TextView wait = text("读取中", 9, C_MUTED, false);
+                wait.setGravity(Gravity.CENTER);
+                wait.setPadding(0, dp(4), 0, 0);
+                loading.addView(wait, fullWidth());
+                detailBox.addView(loading, fullWidth());
+            } else {
+                detailBox.addView(note(lastError));
+            }
             return;
         }
         detailTitle.setText(session.optString("title", "会话"));
