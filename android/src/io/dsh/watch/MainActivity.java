@@ -1200,6 +1200,14 @@ public class MainActivity extends Activity {
     }
 
     /** A tappable line: label, optional hint, and what it opens. */
+    /** Remember a control's place so the page it opens grows out of it. */
+    void captureFrom(View v) {
+        int[] place = new int[2];
+        v.getLocationOnScreen(place);
+        zoomRect = new android.graphics.Rect(place[0], place[1],
+                place[0] + v.getWidth(), place[1] + v.getHeight());
+    }
+
     View pageRow(String label, String hint, final Runnable action) {
         final boolean capture = true;
         LinearLayout box = new LinearLayout(this);
@@ -1654,6 +1662,7 @@ public class MainActivity extends Activity {
             menu.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
+                    captureFrom(v);
                     showColumnPage();
                 }
             });
@@ -3974,6 +3983,7 @@ public class MainActivity extends Activity {
         config.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                captureFrom(v);
                 syncSoloFromPrefs();
                 showSoloConfig(null);
             }
