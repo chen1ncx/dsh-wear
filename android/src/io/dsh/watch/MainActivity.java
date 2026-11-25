@@ -5199,6 +5199,17 @@ public class MainActivity extends Activity {
                 showArtifacts();
             }
         }), fullWidth());
+        body.addView(pageRow("手机扫码填", "手机和手表连同一个 Wi-Fi", new Runnable() {
+            public void run() {
+                showSoloConfig(null);
+            }
+        }), fullWidth());
+
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        body.addView(soloQrView(), lp(-1, dp(150), 0, 0, 0, 0));
+
+        View gap = new View(this);
+        body.addView(gap, lp(-1, dp(8), 0, 0, 0, 0));
         body.addView(pageRow("切回连接 DSH", "回到远程模式", new Runnable() {
             public void run() {
                 mode = "host";
@@ -5212,14 +5223,6 @@ public class MainActivity extends Activity {
                 confirmQuit();
             }
         }), fullWidth());
-        body.addView(pageRow("手机扫码填", "手机和手表连同一个 Wi-Fi", new Runnable() {
-            public void run() {
-                showSoloConfig(null);
-            }
-        }), fullWidth());
-
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        body.addView(soloQrView(), lp(-1, dp(150), 0, 0, 0, 0));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setVerticalScrollBarEnabled(false);
