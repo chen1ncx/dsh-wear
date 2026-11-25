@@ -266,6 +266,10 @@ public class MainActivity extends Activity {
                 // Heal the switcher list on every launch.
                 rememberServer(baseUrl, token, "");
             }
+            if (prefs.getBoolean("openAtRoot", false)) {
+                prefs.edit().putBoolean("openAtRoot", false).apply();
+                history.clear();
+            }
             if (TextUtils.isEmpty(token)) {
                 showPair(null);
             } else {
@@ -1322,11 +1326,16 @@ public class MainActivity extends Activity {
         if (prefs.getBoolean("glass", false)) {
             TextView note = text("玻璃质感已开启，八套配色先不生效", 9, C_MUTED, false);
             note.setGravity(Gravity.CENTER);
-            note.setPadding(0, dp(6), 0, dp(6));
+            note.setPadding(0, dp(6), 0, dp(2));
             page.addView(note, fullWidth());
-        } else {
-            page.addView(themeGrid(), fullWidth());
         }
+        View grid = themeGrid();
+        if (prefs.getBoolean("glass", false)) {
+            grid.setAlpha(0.35f);
+            grid.setOnClickListener(null);
+            disableTaps(grid);
+        }
+        page.addView(grid, fullWidth());
         LinearLayout glassRow = row();
         glassRow.setGravity(Gravity.CENTER_VERTICAL);
         glassRow.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -1358,13 +1367,26 @@ public class MainActivity extends Activity {
         wrapGlass.addView(glassRow, fullWidth());
         page.addView(wrapGlass, fullWidth());
         readingDetail = false;
+        View oldTheme = themePageView;
         themePageView = page;
         if (showing(page)) return;
-        if (currentScreen() != null && currentScreen() == themePageView) {
+        if (oldTheme != null && currentScreen() == oldTheme) {
             showScreen(page);
             return;
         }
         go(page);
+    }
+
+    /** Swallow taps on a whole subtree. */
+    void disableTaps(View view) {
+        view.setClickable(false);
+        view.setEnabled(false);
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i += 1) {
+                disableTaps(group.getChildAt(i));
+            }
+        }
     }
 
     /** Eight palette circles; tapping one applies it and returns to the list. */
@@ -3985,6 +4007,7 @@ public class MainActivity extends Activity {
     /** Leave without the platform's activity zoom/fade. */
     void quitApp() {
         ui.removeCallbacks(ticker);
+        prefs.edit().putBoolean("openAtRoot", true).apply();
         finish();
         overridePendingTransition(0, 0);
     }
