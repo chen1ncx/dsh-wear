@@ -1356,6 +1356,9 @@ public class MainActivity extends Activity {
                 prefs.edit().putBoolean("glass", next).apply();
                 glass = next;
                 dropScreens();
+                // Old pages were drawn with the previous look: make sure back
+                // rebuilds them instead of showing a stale one.
+                history.clear();
                 showThemePage();
             }
         });
