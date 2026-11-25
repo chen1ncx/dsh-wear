@@ -819,6 +819,7 @@ public class MainActivity extends Activity {
         }
         // Put the page we are returning to underneath, then let the top one
         // collapse into the place it came from.
+        resetPage(previous);
         conversation.removeAllViews();
         conversation.addView(previous, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -828,9 +829,6 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 conversation.removeView(current);
-                history.clear();
-                history.push(previous);
-                history.poll();
             }
         });
     }
@@ -881,10 +879,23 @@ public class MainActivity extends Activity {
      * Swaps the visible page. Both pages move: the old one slides out and the
      * new one slides in from the opposite side, the way the system does it.
      */
+    void resetPage(View view) {
+        view.setAlpha(1f);
+        view.setScaleX(1f);
+        view.setScaleY(1f);
+        view.setTranslationX(0f);
+        view.setTranslationY(0f);
+        view.setLayerType(View.LAYER_TYPE_NONE, null);
+    }
+
     void showScreen(View view) {
         if (showing(view)) return;
+        resetPage(view);
         int direction = navDirection;
         navDirection = 0;
+        android.graphics.Rect from = zoomRect;
+        zoomRect = null;
+        if (direction <= 0) from = null;
 
         View old = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
         if (old == view) return;
@@ -895,7 +906,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
 
         // Container transform: the chat grows out of the card that was tapped.
-        if (direction > 0 && zoomRect != null && old != null
+        if (from != null && old != null
                 && conversation.getWidth() > 0 && conversation.getHeight() > 0) {
             final View leaving = old;
             conversation.addView(view, match);
@@ -905,13 +916,12 @@ public class MainActivity extends Activity {
             float height = conversation.getHeight();
             view.setPivotX(width / 2f);
             view.setPivotY(height / 2f);
-            view.setScaleX(zoomRect.width() / width);
-            view.setScaleY(zoomRect.height() / height);
-            view.setTranslationX(zoomRect.centerX() - conversation.getX() - width / 2f);
-            view.setTranslationY(zoomRect.centerY() - conversation.getY() - height / 2f);
+            view.setScaleX(from.width() / width);
+            view.setScaleY(from.height() / height);
+            view.setTranslationX(from.centerX() - conversation.getX() - width / 2f);
+            view.setTranslationY(from.centerY() - conversation.getY() - height / 2f);
             view.setAlpha(0.85f);
-            returnRect = new android.graphics.Rect(zoomRect);
-            zoomRect = null;
+            returnRect = new android.graphics.Rect(from);
             leaving.animate().alpha(0f).setDuration(navDuration).start();
             view.animate()
                     .scaleX(1f)
