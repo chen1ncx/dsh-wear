@@ -5353,6 +5353,20 @@ public class MainActivity extends Activity {
                 showParams();
             }
         }), fullWidth());
+        boolean canWrite = android.provider.Settings.System.canWrite(this);
+        body.addView(pageRow("修改系统设置 " + (canWrite ? "●" : "○"),
+                canWrite ? "可以改息屏时间这类设置" : "打开后才能改息屏时间", new Runnable() {
+                    public void run() {
+                        try {
+                            Intent intent = new Intent(android.provider.Settings
+                                    .ACTION_MANAGE_WRITE_SETTINGS);
+                            intent.setData(android.net.Uri.parse("package:" + getPackageName()));
+                            startActivity(intent);
+                        } catch (Exception no) {
+                            toast("打不开设置：" + no);
+                        }
+                    }
+                }), fullWidth());
         accReady = WatchAcc.ready();
         body.addView(pageRow("无障碍权限 " + (accReady ? "●" : "○"),
                 accReady ? "已开启，能点屏幕、开应用"

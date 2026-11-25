@@ -48,6 +48,51 @@ final class SoloAgent {
                             .put("properties", new JSONObject()
                                     .put("app", new JSONObject().put("type", "string")))
                             .put("required", new JSONArray().put("app"))));
+            list.put(tool("clip_get", "读剪贴板里的文字",
+                    new JSONObject().put("type", "object").put("properties", new JSONObject())));
+            list.put(tool("clip_set", "把文字写进剪贴板",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("text", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("text"))));
+            list.put(tool("notify", "给手表发一条通知",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("title", new JSONObject().put("type", "string"))
+                                    .put("text", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("title").put("text"))));
+            list.put(tool("file_edit", "把文件里的一段文字替换成另一段",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("path", new JSONObject().put("type", "string"))
+                                    .put("find", new JSONObject().put("type", "string"))
+                                    .put("replace", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("path").put("find")
+                                    .put("replace"))));
+            list.put(tool("move_file", "移动或重命名文件（范围同读写）",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("from", new JSONObject().put("type", "string"))
+                                    .put("to", new JSONObject().put("type", "string")))
+                            .put("required", new JSONArray().put("from").put("to"))));
+            list.put(tool("vibrate", "让手表震动一下",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("ms", new JSONObject().put("type", "integer")
+                                            .put("description", "毫秒，默认 400")))));
+            list.put(tool("web_search", "上网搜一下，返回前几条标题和链接",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("query", new JSONObject().put("type", "string"))
+                                    .put("count", new JSONObject().put("type", "integer")
+                                            .put("description", "默认 5 条")))
+                            .put("required", new JSONArray().put("query"))));
+            list.put(tool("screen_timeout", "读或设置息屏时间",
+                    new JSONObject().put("type", "object")
+                            .put("properties", new JSONObject()
+                                    .put("seconds", new JSONObject().put("type", "integer")
+                                            .put("description", "不填就是读；填 15/30/60 等")))
+                            .put("required", new JSONArray().put("seconds"))));
             list.put(tool("now", "当前日期和时间",
                     new JSONObject().put("type", "object").put("properties", new JSONObject())));
             list.put(tool("calc", "算一个算式，只支持数字和 + - * / ( )",
@@ -161,6 +206,43 @@ final class SoloAgent {
 
     static String run(Context context, String name, JSONObject args) {
         try {
+            if ("clip_get".equals(name)) {
+                return clipGet(context);
+            }
+            if ("clip_set".equals(name)) {
+                return clipSet(context, args.optString("text"));
+            }
+            if ("notify".equals(name)) {
+                return pushNote(context, args.optString("title"), args.optString("text"));
+            }
+            if ("file_edit".equals(name)) {
+                File file = resolve(context, args.optString("path"));
+                if (file == null) return "路径不允许";
+                if (!file.exists()) return "没有这个文件";
+                String all = readFileText(file);
+                String find = args.optString("find");
+                if (!all.contains(find)) return "文件里没有这段文字";
+                writeFileText(file, all.replace(find, args.optString("replace")));
+                return "改好了";
+            }
+            if ("move_file".equals(name)) {
+                File from = resolve(context, args.optString("from"));
+                File to = resolve(context, args.optString("to"));
+                if (from == null || to == null) return "路径不允许";
+                if (!from.exists()) return "源文件不存在";
+                File parent = to.getParentFile();
+                if (parent != null && !parent.exists()) parent.mkdirs();
+                return from.renameTo(to) ? "移好了" : "移不动";
+            }
+            if ("vibrate".equals(name)) {
+                return buzz(context, args.optInt("ms", 400));
+            }
+            if ("web_search".equals(name)) {
+                return search(args.optString("query"), args.optInt("count", 5));
+            }
+            if ("screen_timeout".equals(name)) {
+                return timeout(context, args.has("seconds") ? args.optInt("seconds", 0) : -1);
+            }
             if ("ui_screen".equals(name)) {
                 return WatchAcc.dump();
             }
@@ -342,6 +424,26 @@ final class SoloAgent {
         return file != null && file.isDirectory() ? file : null;
     }
 
+    static String readFileText(File file) throws Exception {
+        FileInputStream input = new FileInputStream(file);
+        try {
+            byte[] buffer = new byte[(int) Math.min(file.length(), 200000)];
+            int read = input.read(buffer);
+            return read <= 0 ? "" : new String(buffer, 0, read, "UTF-8");
+        } finally {
+            input.close();
+        }
+    }
+
+    static void writeFileText(File file, String text) throws Exception {
+        FileOutputStream output = new FileOutputStream(file, false);
+        try {
+            output.write(text.getBytes("UTF-8"));
+        } finally {
+            output.close();
+        }
+    }
+
     private static String readStream(java.io.InputStream stream, int max) throws Exception {
         java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
         byte[] chunk = new byte[4096];
@@ -434,6 +536,110 @@ final class SoloAgent {
 
         private void skip() {
             while (at < text.length() && Character.isWhitespace(text.charAt(at))) at += 1;
+        }
+    }
+
+
+    private static String clipGet(Context context) {
+        android.content.ClipboardManager clip = (android.content.ClipboardManager)
+                context.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clip == null || !clip.hasPrimaryClip()) return "剪贴板是空的";
+        android.content.ClipData data = clip.getPrimaryClip();
+        if (data == null || data.getItemCount() == 0) return "剪贴板是空的";
+        CharSequence text = data.getItemAt(0).coerceToText(context);
+        return text == null || text.length() == 0 ? "剪贴板是空的" : text.toString();
+    }
+
+    private static String clipSet(Context context, String text) {
+        android.content.ClipboardManager clip = (android.content.ClipboardManager)
+                context.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clip == null) return "剪贴板不可用";
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("DSH", text));
+        return "放进剪贴板了";
+    }
+
+    private static String pushNote(Context context, String title, String text) {
+        android.app.NotificationManager manager = (android.app.NotificationManager)
+                context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return "通知服务不可用";
+        String channel = "dsh-wear";
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            android.app.NotificationChannel group = new android.app.NotificationChannel(
+                    channel, "DSH", android.app.NotificationManager.IMPORTANCE_DEFAULT);
+            manager.createNotificationChannel(group);
+        }
+        android.app.Notification.Builder builder = android.os.Build.VERSION.SDK_INT >= 26
+                ? new android.app.Notification.Builder(context, channel)
+                : new android.app.Notification.Builder(context);
+        builder.setSmallIcon(io.dsh.watch.R.mipmap.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new android.app.Notification.BigTextStyle().bigText(text))
+                .setAutoCancel(true);
+        manager.notify((int) (System.currentTimeMillis() % 100000), builder.build());
+        return "通知发出去了";
+    }
+
+    private static String buzz(Context context, int ms) {
+        android.os.Vibrator vibrator = (android.os.Vibrator)
+                context.getSystemService(Context.VIBRATOR_SERVICE);
+        if (vibrator == null || !vibrator.hasVibrator()) return "这块表没有马达";
+        vibrator.vibrate(Math.max(50, Math.min(ms, 3000)));
+        return "震了";
+    }
+
+    private static String timeout(Context context, int seconds) {
+        try {
+            if (seconds <= 0) {
+                int now = android.provider.Settings.System.getInt(
+                        context.getContentResolver(), android.provider.Settings.System
+                                .SCREEN_OFF_TIMEOUT, 0);
+                return "现在 " + (now / 1000) + " 秒后息屏";
+            }
+            android.provider.Settings.System.putInt(context.getContentResolver(),
+                    android.provider.Settings.System.SCREEN_OFF_TIMEOUT, seconds * 1000);
+            return "改成 " + seconds + " 秒了";
+        } catch (Exception no) {
+            return "改不了，要在设置里给本应用「修改系统设置」权限";
+        }
+    }
+
+    /** Bing's HTML result page, no API key needed. */
+    static String search(String query, int count) {
+        if (query == null || query.trim().isEmpty()) return "要搜什么？";
+        int want = Math.max(1, Math.min(count, 8));
+        try {
+            String url = "https://cn.bing.com/search?q="
+                    + java.net.URLEncoder.encode(query, "UTF-8") + "&setlang=zh-CN";
+            java.net.URLConnection raw = new java.net.URL(url).openConnection();
+            raw.setConnectTimeout(12000);
+            raw.setReadTimeout(15000);
+            raw.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 8.1) AppleWebKit/537.36");
+            String html = readStream(raw.getInputStream(), 60000);
+            StringBuilder out = new StringBuilder();
+            java.util.regex.Matcher block = java.util.regex.Pattern
+                    .compile("(?is)<li class=\"b_algo\".*?</li>").matcher(html);
+            int used = 0;
+            while (block.find() && used < want) {
+                String item = block.group();
+                java.util.regex.Matcher link = java.util.regex.Pattern
+                        .compile("(?is)<h2[^>]*>\\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>")
+                        .matcher(item);
+                if (!link.find()) continue;
+                String href = link.group(1);
+                String title = link.group(2).replaceAll("<[^>]+>", "").trim();
+                String body = item.replaceAll("(?is)<script.*?</script>", " ")
+                        .replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
+                if (body.startsWith(title)) body = body.substring(title.length()).trim();
+                if (body.length() > 120) body = body.substring(0, 120) + "…";
+                out.append(used + 1).append(". ").append(title).append('\n')
+                        .append(href).append('\n').append(body).append('\n');
+                used += 1;
+            }
+            if (used == 0) return "没搜到结果（可能被拦了，试试 http_fetch 一个具体网址）";
+            return out.toString().trim();
+        } catch (Exception no) {
+            return "搜索失败：" + no;
         }
     }
 
