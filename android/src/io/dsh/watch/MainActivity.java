@@ -805,13 +805,68 @@ public class MainActivity extends Activity {
 
     void goBack() {
         navDirection = -1;
-        View previous = history.poll();
-        if (previous != null && previous.getParent() == null) {
+        final View previous = history.poll();
+        if (previous == null || previous.getParent() != null) {
+            history.clear();
+            showList();
+            return;
+        }
+        final View current = conversation.getChildCount() > 0
+                ? conversation.getChildAt(0) : null;
+        if (current == null || navDuration <= 0) {
             showScreen(previous);
             return;
         }
-        history.clear();
-        showList();
+        // Put the page we are returning to underneath, then let the top one
+        // collapse into the place it came from.
+        conversation.removeAllViews();
+        conversation.addView(previous, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        conversation.addView(current, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        animateAway(current, new Runnable() {
+            @Override
+            public void run() {
+                conversation.removeView(current);
+                history.clear();
+                history.push(previous);
+                history.poll();
+            }
+        });
+    }
+
+    /** Shrink into the remembered card, or fade out from the centre. */
+    void animateAway(final View page, final Runnable done) {
+        int width = conversation.getWidth();
+        int height = conversation.getHeight();
+        android.graphics.Rect target = returnRect != null ? returnRect : zoomRect;
+        page.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        android.view.ViewPropertyAnimator run = page.animate()
+                .alpha(0.4f)
+                .setDuration(navDuration)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                .withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        page.setLayerType(View.LAYER_TYPE_NONE, null);
+                        returnRect = null;
+                        zoomRect = null;
+                        done.run();
+                    }
+                });
+        if (target != null && width > 0 && height > 0) {
+            page.setPivotX(width / 2f);
+            page.setPivotY(height / 2f);
+            run.scaleX(target.width() / (float) width)
+                    .scaleY(target.height() / (float) height)
+                    .translationX(target.centerX() - conversation.getX() - width / 2f)
+                    .translationY(target.centerY() - conversation.getY() - height / 2f);
+        } else {
+            page.setPivotX(width / 2f);
+            page.setPivotY(height / 2f);
+            run.scaleX(0.92f).scaleY(0.92f);
+        }
+        run.start();
     }
 
     /** Put the conversation content (list or detail) into the middle page. */
@@ -832,8 +887,6 @@ public class MainActivity extends Activity {
         navDirection = 0;
 
         View old = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
-        Log.i(TAG, "showScreen dir=" + direction + " zoom=" + (zoomRect != null)
-                + " old=" + (old != null) + " w=" + conversation.getWidth());
         if (old == view) return;
         if (old != null) old.animate().cancel();
         view.animate().cancel();
@@ -885,6 +938,30 @@ public class MainActivity extends Activity {
         if (direction == 0 || old == null || navDuration <= 0) {
             view.setTranslationX(0f);
             view.setAlpha(1f);
+            return;
+        }
+
+        // No card to grow from: still expand from the centre instead of sliding.
+        if (direction > 0) {
+            view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            view.setPivotX(view.getWidth() / 2f);
+            view.setPivotY(view.getHeight() / 2f);
+            view.setScaleX(0.92f);
+            view.setScaleY(0.92f);
+            view.setAlpha(0.4f);
+            view.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .alpha(1f)
+                    .setDuration(navDuration)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .withEndAction(new Runnable() {
+                        @Override
+                        public void run() {
+                            view.setLayerType(View.LAYER_TYPE_NONE, null);
+                        }
+                    })
+                    .start();
             return;
         }
 
@@ -1113,11 +1190,8 @@ public class MainActivity extends Activity {
     }
 
     /** A tappable line: label, optional hint, and what it opens. */
-    /** Set while building a list whose rows should grow into the next page. */
-    boolean zoomRows;
-
     View pageRow(String label, String hint, final Runnable action) {
-        final boolean capture = zoomRows;
+        final boolean capture = true;
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(12), dp(6), dp(12), dp(7));
@@ -1138,7 +1212,6 @@ public class MainActivity extends Activity {
                     zoomRect = new android.graphics.Rect(place[0], place[1],
                             place[0] + v.getWidth(), place[1] + v.getHeight());
                 }
-                Log.i(TAG, "rowClik capture=" + capture + " rect=" + zoomRect);
                 action.run();
             }
         });
@@ -3923,7 +3996,6 @@ public class MainActivity extends Activity {
             }
         }), fullWidth());
 
-        zoomRows = true;
         for (int i = 0; i < list.length(); i += 1) {
             final JSONObject item = list.optJSONObject(i);
             if (item == null) continue;
@@ -3953,7 +4025,6 @@ public class MainActivity extends Activity {
             });
             body.addView(row, fullWidth());
         }
-        zoomRows = false;
 
         if (list.length() == 0) {
             TextView empty = text("还没有对话。点上面的＋新对话开始。", 9, C_MUTED, false);
@@ -5505,7 +5576,6 @@ public class MainActivity extends Activity {
                     v.getLocationOnScreen(place);
                     zoomRect = new android.graphics.Rect(place[0], place[1],
                             place[0] + v.getWidth(), place[1] + v.getHeight());
-                    Log.i(TAG, "cardTap rect=" + zoomRect);
                     openConversation(session);
                 }
             });
