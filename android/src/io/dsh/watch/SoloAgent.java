@@ -604,43 +604,52 @@ final class SoloAgent {
         }
     }
 
-    /** Bing's HTML result page, no API key needed. */
+    /** Bing's RSS output: stable XML, no API key, no JavaScript. */
     static String search(String query, int count) {
         if (query == null || query.trim().isEmpty()) return "要搜什么？";
         int want = Math.max(1, Math.min(count, 8));
         try {
-            String url = "https://cn.bing.com/search?q="
-                    + java.net.URLEncoder.encode(query, "UTF-8") + "&setlang=zh-CN";
+            String url = "https://cn.bing.com/search?format=rss&setlang=zh-CN&q="
+                    + java.net.URLEncoder.encode(query, "UTF-8");
             java.net.URLConnection raw = new java.net.URL(url).openConnection();
             raw.setConnectTimeout(12000);
             raw.setReadTimeout(15000);
-            raw.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 8.1) AppleWebKit/537.36");
-            String html = readStream(raw.getInputStream(), 60000);
-            StringBuilder out = new StringBuilder();
+            raw.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 8.1)");
+            String xml = readStream(raw.getInputStream(), 80000);
             java.util.regex.Matcher block = java.util.regex.Pattern
-                    .compile("(?is)<li class=\"b_algo\".*?</li>").matcher(html);
+                    .compile("(?is)<item>(.*?)</item>").matcher(xml);
+            StringBuilder out = new StringBuilder();
             int used = 0;
             while (block.find() && used < want) {
-                String item = block.group();
-                java.util.regex.Matcher link = java.util.regex.Pattern
-                        .compile("(?is)<h2[^>]*>\\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>")
-                        .matcher(item);
-                if (!link.find()) continue;
-                String href = link.group(1);
-                String title = link.group(2).replaceAll("<[^>]+>", "").trim();
-                String body = item.replaceAll("(?is)<script.*?</script>", " ")
-                        .replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
-                if (body.startsWith(title)) body = body.substring(title.length()).trim();
-                if (body.length() > 120) body = body.substring(0, 120) + "…";
+                String item = block.group(1);
+                String title = pick(item, "title");
+                String link = pick(item, "link");
+                String body = pick(item, "description");
+                if (title.isEmpty() || link.isEmpty()) continue;
                 out.append(used + 1).append(". ").append(title).append('\n')
-                        .append(href).append('\n').append(body).append('\n');
+                        .append(link).append('\n');
+                if (!body.isEmpty()) {
+                    out.append(body.length() > 120 ? body.substring(0, 120) + "…" : body)
+                            .append('\n');
+                }
                 used += 1;
             }
-            if (used == 0) return "没搜到结果（可能被拦了，试试 http_fetch 一个具体网址）";
+            if (used == 0) return "没搜到结果，换个说法再试";
             return out.toString().trim();
         } catch (Exception no) {
             return "搜索失败：" + no;
         }
+    }
+
+    /** One RSS field, tags stripped and the usual entities decoded. */
+    static String pick(String xml, String tag) {
+        java.util.regex.Matcher match = java.util.regex.Pattern
+                .compile("(?is)<" + tag + "[^>]*>(.*?)</" + tag + ">").matcher(xml);
+        if (!match.find()) return "";
+        return match.group(1).replaceAll("(?is)<[^>]+>", " ")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+                .replace("&#39;", "'").replace("&amp;", "&")
+                .replaceAll("\\s+", " ").trim();
     }
 
     /** Launch by package name, else by a name that contains the query. */

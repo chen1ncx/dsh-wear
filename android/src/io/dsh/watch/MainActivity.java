@@ -5363,7 +5363,16 @@ public class MainActivity extends Activity {
                             intent.setData(android.net.Uri.parse("package:" + getPackageName()));
                             startActivity(intent);
                         } catch (Exception no) {
-                            toast("打不开设置：" + no);
+                            // OPPO blocks the direct page: fall back to the main
+                            // settings app so the user can find it by hand.
+                            try {
+                                startActivity(new Intent(android.provider.Settings
+                                        .ACTION_SETTINGS));
+                            } catch (Exception again) {
+                                toast("这台表不让跳转，请去系统设置里找「特殊权限」");
+                                return;
+                            }
+                            toast("请到 设置 → 特殊权限 → 修改系统设置 里打开");
                         }
                     }
                 }), fullWidth());
