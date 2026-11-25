@@ -5283,10 +5283,7 @@ public class MainActivity extends Activity {
         body.addView(gap, lp(-1, dp(8), 0, 0, 0, 0));
         body.addView(pageRow("切回连接 DSH", "回到远程模式", new Runnable() {
             public void run() {
-                mode = "host";
-                saveSoloConfig();
-                history.clear();
-                showList();
+                startModeSwitch("host");
             }
         }), fullWidth());
         body.addView(pageRow("退出应用", "手表上的 DSH 会关掉", new Runnable() {
