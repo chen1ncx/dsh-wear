@@ -255,7 +255,8 @@ public class MainActivity extends Activity {
             root = new FrameLayout(this);
             root.setBackgroundColor(C_BG);
             setContentView(root);
-            loadSolo();
+            glass = prefs.getBoolean("glass", false);
+        loadSolo();
         buildPager();
 
             applyLaunchConfig(getIntent());
@@ -1317,6 +1318,17 @@ public class MainActivity extends Activity {
     void showThemePage() {
         LinearLayout page = secondary("主题色");
         page.addView(themeGrid(), fullWidth());
+        boolean on = prefs.getBoolean("glass", false);
+        page.addView(pageRow("玻璃质感 " + (on ? "●" : "○"),
+                "半透明卡片，像 iOS 那种", new Runnable() {
+                    public void run() {
+                        boolean next = !prefs.getBoolean("glass", false);
+                        prefs.edit().putBoolean("glass", next).apply();
+                        glass = next;
+                        selectTheme(prefs.getInt("theme", 0));
+                        showThemePage();
+                    }
+                }), fullWidth());
         readingDetail = false;
         go(page);
     }
@@ -3909,6 +3921,7 @@ public class MainActivity extends Activity {
     void selectTheme(int index) {
         Log.i(TAG, "selectTheme " + index);
         prefs.edit().putInt("theme", index).apply();
+        glass = prefs.getBoolean("glass", false);
         applyTheme(index);
         root.setBackgroundColor(C_BG);
         if (conversation != null) conversation.setBackgroundColor(C_BG);
@@ -5940,11 +5953,30 @@ public class MainActivity extends Activity {
         return drawable;
     }
 
+    /** When on, cards and buttons are translucent with a light hairline. */
+    boolean glass;
+
     GradientDrawable bg(int color, float radius) {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
+        if (glass && shouldGlass(color)) {
+            drawable.setColors(new int[]{withAlpha(0x2E, 0xFFFFFF),
+                    withAlpha(0x14, 0xFFFFFF)});
+            drawable.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM);
+            drawable.setStroke(1, withAlpha(0x2B, 0xFFFFFF));
+        } else {
+            drawable.setColor(color);
+        }
         drawable.setCornerRadius(dp(radius));
         return drawable;
+    }
+
+    /** Backgrounds stay opaque: only surfaces get the glass treatment. */
+    boolean shouldGlass(int color) {
+        return color != C_BG;
+    }
+
+    int withAlpha(int alpha, int color) {
+        return (color & 0x00FFFFFF) | (alpha << 24);
     }
 
     GradientDrawable round(int color, float radius) {
