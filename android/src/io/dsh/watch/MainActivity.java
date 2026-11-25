@@ -5036,7 +5036,12 @@ public class MainActivity extends Activity {
         done.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                showSoloSessions();
+                zoomThen(new Runnable() {
+                    @Override
+                    public void run() {
+                        showSoloSessions();
+                    }
+                });
             }
         });
         page.addView(soloHeader("独立使用设置", done), fullWidth());
@@ -5177,8 +5182,13 @@ public class MainActivity extends Activity {
                     saveActiveProfile();
                 }
                 toast(soloModel().isEmpty() ? "已保存，点「获取」选个模型" : "已保存");
-                history.clear();
-                showSoloSessions();
+                zoomThen(new Runnable() {
+                    @Override
+                    public void run() {
+                        history.clear();
+                        showSoloSessions();
+                    }
+                });
             }
         });
         body.addView(save, lp(-1, dp(32), 0, dp(8), 0, 0));
