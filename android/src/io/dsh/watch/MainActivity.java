@@ -1242,6 +1242,40 @@ public class MainActivity extends Activity {
         return wrap;
     }
 
+    /** Grow a loading screen out of the tapped row, then fade into the mode. */
+    void startModeSwitch(final String target) {
+        LinearLayout page = page();
+        page.setGravity(Gravity.CENTER);
+        TextView wait = text("切换中", 9, C_MUTED, false);
+        wait.setGravity(Gravity.CENTER);
+        wait.setPadding(0, 0, 0, dp(8));
+        page.addView(wait, fullWidth());
+        page.addView(new LoadingSpinner(this, C_MUTED, 20f, 2f), lp(-2, -2, 0, 0, 0, 0));
+
+        navDirection = 1;   // zoom out of whatever row was tapped
+        showScreen(page);
+
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                mode = target;
+                saveSoloConfig();
+                history.clear();
+                navDirection = 0;
+                if ("solo".equals(target)) {
+                    showSoloSessions();
+                } else {
+                    showList();
+                }
+                View now = conversation.getChildCount() > 0 ? conversation.getChildAt(0) : null;
+                if (now != null) {
+                    now.setAlpha(0f);
+                    now.animate().alpha(1f).setDuration(170).start();
+                }
+            }
+        }, 300);
+    }
+
     void showColumnPage() {
         LinearLayout page = secondary("更多");
         LinearLayout body = new LinearLayout(this);
@@ -4972,21 +5006,13 @@ public class MainActivity extends Activity {
         body.addView(pageRow("连接 DSH" + ("host".equals(mode) ? "　●" : ""),
                 "远程看会话、审批、回话", new Runnable() {
                     public void run() {
-                        mode = "host";
-                        saveSoloConfig();
-                        history.clear();
-                        navDirection = 1;
-                        showList();
+                        startModeSwitch("host");
                     }
                 }), fullWidth());
         body.addView(pageRow("独立使用" + ("solo".equals(mode) ? "　●" : ""),
                 "手表直接调模型，不用电脑", new Runnable() {
                     public void run() {
-                        mode = "solo";
-                        saveSoloConfig();
-                        history.clear();
-                        navDirection = 1;
-                        showSoloSessions();
+                        startModeSwitch("solo");
                     }
                 }), fullWidth());
         scrollInto(page, body);
