@@ -4445,9 +4445,23 @@ public class MainActivity extends Activity {
         page.setOrientation(LinearLayout.VERTICAL);
         page.setBackgroundColor(C_BG);
 
+        final TextView autoChip = text(autoApprove() ? "自动 ●" : "审批 ○", 8,
+                autoApprove() ? C_ACCENT : C_MUTED, true);
+        autoChip.setGravity(Gravity.CENTER);
+        autoChip.setPadding(dp(5), dp(1), dp(5), dp(1));
+        autoChip.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean next = !autoApprove();
+                setAutoApprove(next);
+                autoChip.setText(next ? "自动 ●" : "审批 ○");
+                autoChip.setTextColor(next ? C_ACCENT : C_MUTED);
+                toast(next ? "工具调用不再问" : "每次工具调用都会问");
+            }
+        });
         LinearLayout head = row();
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(dp(6), dp(6), dp(8), dp(2));
+        head.setPadding(dp(6), dp(3), dp(6), dp(0));
         TextView back = text("‹ 列表", 10, C_BLUE, true);
         back.setPadding(dp(4), dp(2), dp(6), dp(2));
         back.setOnClickListener(new View.OnClickListener() {
@@ -4461,40 +4475,22 @@ public class MainActivity extends Activity {
                 });
             }
         });
-        head.addView(back, lp(-2, -2, 0, 0, 8, 0));
+        head.addView(back, lp(-2, -2, 0, 0, 6, 0));
         TextView title = text(SoloStore.titleOf(session), 11, C_ACCENT, true);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         head.addView(title, weight(1));
+        head.addView(autoChip, lp(-2, dp(18), 0, 0, 0, 0));
+        autoChip.setText(autoApprove() ? "自动审批 ●" : "自动审批 ○");
         page.addView(head, fullWidth());
 
-        final TextView autoChip = text(autoApprove() ? "自动审批 ●" : "自动审批 ○", 8,
-                autoApprove() ? C_ACCENT : C_MUTED, true);
-        autoChip.setPadding(dp(8), dp(2), dp(8), dp(2));
-        autoChip.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                boolean next = !autoApprove();
-                setAutoApprove(next);
-                autoChip.setText(next ? "自动审批 ●" : "自动审批 ○");
-                autoChip.setTextColor(next ? C_ACCENT : C_MUTED);
-                toast(next ? "工具调用不再问" : "每次工具调用都会问");
-            }
-        });
-        soloStatus = text((soloModel().isEmpty() ? "未选模型" : soloModel())
-                + " · " + soloHostLabel(soloBase()), 8, C_MUTED, false);
-        soloStatus.setPadding(dp(10), 0, dp(10), 0);
+        soloStatus = null;
         soloEvent = text("", 8, C_MUTED, false);
         soloEvent.setPadding(dp(10), dp(1), dp(10), dp(1));
+        soloEvent.setVisibility(View.GONE);
         soloEvent.setSingleLine(true);
         soloEvent.setEllipsize(TextUtils.TruncateAt.END);
         page.addView(soloEvent, fullWidth());
-
-        LinearLayout statusRow = row();
-        statusRow.setGravity(Gravity.CENTER_VERTICAL);
-        statusRow.addView(soloStatus, weight(1));
-        statusRow.addView(autoChip, lp(-2, dp(20), 0, 0, 0, 0));
-        page.addView(statusRow, fullWidth());
 
         soloLog = new LinearLayout(this);
         soloLog.setOrientation(LinearLayout.VERTICAL);
@@ -5280,9 +5276,9 @@ public class MainActivity extends Activity {
     LinearLayout soloHeader(String title, View right) {
         LinearLayout head = row();
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(dp(8), dp(6), dp(8), dp(2));
-        head.addView(text(title, 12, C_ACCENT, true), weight(1));
-        if (right != null) head.addView(right, lp(dp(48), dp(24), 0, 0, 0, 0));
+        head.setPadding(dp(8), dp(2), dp(6), dp(0));
+        head.addView(text(title, 11, C_ACCENT, true), weight(1));
+        if (right != null) head.addView(right, lp(dp(42), dp(20), 0, 0, 0, 0));
         return head;
     }
 
