@@ -2107,7 +2107,7 @@ public class MainActivity extends Activity {
             screenDetail = page();
 
             LinearLayout head = row();
-            head.setPadding(dp(6), dp(6), dp(8), dp(2));
+            head.setPadding(dp(6), dp(3), dp(8), dp(0));
             TextView back = text("‹", 20, C_BLUE, true);
             back.setPadding(dp(6), 0, dp(8), 0);
             back.setOnClickListener(new View.OnClickListener() {
@@ -4483,9 +4483,9 @@ public class MainActivity extends Activity {
         });
         soloStatus = text((soloModel().isEmpty() ? "未选模型" : soloModel())
                 + " · " + soloHostLabel(soloBase()), 8, C_MUTED, false);
-        soloStatus.setPadding(dp(10), 0, dp(10), dp(2));
+        soloStatus.setPadding(dp(10), 0, dp(10), 0);
         soloEvent = text("", 8, C_MUTED, false);
-        soloEvent.setPadding(dp(10), 0, dp(10), dp(2));
+        soloEvent.setPadding(dp(10), dp(1), dp(10), dp(1));
         soloEvent.setSingleLine(true);
         soloEvent.setEllipsize(TextUtils.TruncateAt.END);
         page.addView(soloEvent, fullWidth());
@@ -4498,7 +4498,7 @@ public class MainActivity extends Activity {
 
         soloLog = new LinearLayout(this);
         soloLog.setOrientation(LinearLayout.VERTICAL);
-        soloLog.setPadding(dp(8), dp(2), dp(8), dp(4));
+        soloLog.setPadding(dp(8), dp(4), dp(8), dp(4));
         soloScroll = new ScrollView(this);
         soloScroll.setVerticalScrollBarEnabled(false);
         soloScroll.addView(soloLog, new FrameLayout.LayoutParams(
@@ -4554,6 +4554,17 @@ public class MainActivity extends Activity {
             String role = item.optString("role");
             if ("tool".equals(role)) continue;
             final boolean mine = "user".equals(role);
+            String plain = item.optString("content", "").trim();
+            if (!mine && plain.isEmpty()) {
+                // A turn that only called tools: nothing to show as a bubble.
+                boolean waiting = soloBusy && i == count - 1;
+                if (waiting) {
+                    TextView dots = text("…", 11, C_MUTED, false);
+                    dots.setPadding(dp(9), dp(4), dp(9), dp(4));
+                    soloLog.addView(dots, fullWidth());
+                }
+                continue;
+            }
             final int index = i;
             LinearLayout bubble = new LinearLayout(this);
             bubble.setOrientation(LinearLayout.VERTICAL);
@@ -5201,7 +5212,11 @@ public class MainActivity extends Activity {
         ui.post(new Runnable() {
             @Override
             public void run() {
-                if (soloEvent != null) soloEvent.setText(step);
+                if (soloEvent != null) {
+                    boolean blank = step == null || step.isEmpty();
+                    soloEvent.setVisibility(blank ? View.GONE : View.VISIBLE);
+                    soloEvent.setText(blank ? "" : step);
+                }
             }
         });
     }
