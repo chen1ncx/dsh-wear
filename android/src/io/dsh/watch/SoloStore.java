@@ -121,8 +121,18 @@ final class SoloStore {
             item.put("title", title == null || title.isEmpty() ? "新对话" : title);
             item.put("messages", new JSONArray());
             item.put("at", System.currentTimeMillis());
-            list.put(0, item);
-            saveSessions(prefs, list);
+            // Build the new order explicitly: JSONArray.put(index, …) semantics
+            // differ between Android versions, and losing the old chats here is
+            // exactly the bug we hit.
+            JSONArray order = new JSONArray();
+            order.put(item);
+            for (int i = 0; i < list.length(); i += 1) {
+                JSONObject other = list.optJSONObject(i);
+                if (other != null) order.put(other);
+            }
+            android.util.Log.i("SoloStore", "newSession kept=" + (order.length() - 1)
+                    + " total=" + order.length());
+            saveSessions(prefs, order);
             prefs.edit().putString("soloOpen", item.optString("id")).apply();
         } catch (Exception ignored) {
         }
@@ -142,7 +152,21 @@ final class SoloStore {
             }
         } catch (Exception ignored) {
         }
+        android.util.Log.i("SoloStore", "touch kept=" + order.length());
         saveSessions(prefs, order);
+    }
+
+    static void setArchived(SharedPreferences prefs, String id, boolean archived) {
+        JSONArray list = sessions(prefs);
+        for (int i = 0; i < list.length(); i += 1) {
+            JSONObject item = list.optJSONObject(i);
+            if (item == null || !id.equals(item.optString("id"))) continue;
+            try {
+                item.put("archived", archived);
+            } catch (Exception ignored) {
+            }
+        }
+        saveSessions(prefs, list);
     }
 
     static void removeSession(SharedPreferences prefs, String id) {

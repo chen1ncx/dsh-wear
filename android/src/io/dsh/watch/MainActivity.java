@@ -1204,7 +1204,83 @@ public class MainActivity extends Activity {
                 place[0] + v.getWidth(), place[1] + v.getHeight());
     }
 
+    /** A row that slides aside to expose its buttons, like the remote list. */
+    class SlideRow extends FrameLayout {
+        final View content;
+        final LinearLayout actions;
+        final int actionWidth;
+        boolean opened;
+
+        SlideRow(View content, String[] labels, int[] colors, Runnable[] runs) {
+            super(MainActivity.this);
+            this.content = content;
+            actionWidth = dp(58) * labels.length;
+            actions = row();
+            actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            for (int i = 0; i < labels.length; i += 1) {
+                final Runnable run = runs[i];
+                boolean danger = "删除".equals(labels[i]);
+                TextView button = text(labels[i], 10, danger ? 0xFFFFFFFF : C_TEXT, true);
+                button.setGravity(Gravity.CENTER);
+                GradientDrawable fill = new GradientDrawable();
+                if (danger && glass) {
+                    // Red, but still glassy.
+                    fill.setColor(0x66E5484D);
+                    fill.setStroke(1, 0x99E5484D);
+                } else {
+                    fill.setColor(colors[i]);
+                }
+                fill.setCornerRadius(dp(16));
+                button.setBackground(fill);
+                button.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        close();
+                        run.run();
+                    }
+                });
+                LinearLayout.LayoutParams slot = new LinearLayout.LayoutParams(
+                        dp(54), ViewGroup.LayoutParams.MATCH_PARENT);
+                slot.setMargins(dp(2), dp(1), dp(2), dp(1));
+                actions.addView(button, slot);
+            }
+            FrameLayout.LayoutParams where = new FrameLayout.LayoutParams(
+                    actionWidth, ViewGroup.LayoutParams.MATCH_PARENT);
+            where.gravity = Gravity.RIGHT;
+            addView(actions, where);
+            addView(content, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            actions.setVisibility(View.INVISIBLE);
+        }
+
+        void toggle() {
+            if (opened) close(); else open();
+        }
+
+        void open() {
+            opened = true;
+            actions.setVisibility(View.VISIBLE);
+            content.animate().translationX(-actionWidth).setDuration(160).start();
+        }
+
+        void close() {
+            opened = false;
+            content.animate().translationX(0f).setDuration(140)
+                    .withEndAction(new Runnable() {
+                        @Override
+                        public void run() {
+                            actions.setVisibility(View.INVISIBLE);
+                        }
+                    })
+                    .start();
+        }
+    }
+
     View pageRow(String label, String hint, final Runnable action) {
+        return pageRow(label, hint, action, null);
+    }
+
+    View pageRow(String label, String hint, final Runnable action, final Runnable hold) {
         final boolean capture = true;
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -1217,6 +1293,15 @@ public class MainActivity extends Activity {
             box.addView(sub, fullWidth());
         }
         box.setClickable(true);
+        if (hold != null) {
+            box.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    hold.run();
+                    return true;
+                }
+            });
+        }
         box.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -1435,7 +1520,7 @@ public class MainActivity extends Activity {
         iconRow.addView(icon, lp(dp(54), dp(54), 0, 0, 0, 0));
         body.addView(iconRow, fullWidth());
 
-        TextView name = text("DSH on wear", 14, C_ACCENT, true);
+        TextView name = text("DSH OWN", 14, C_ACCENT, true);
         name.setGravity(Gravity.CENTER);
         name.setPadding(dp(8), dp(2), dp(8), 0);
         body.addView(name, fullWidth());
@@ -4054,6 +4139,7 @@ public class MainActivity extends Activity {
     TextView soloStatus;
     TextView soloEvent;
     View soloRootPage;
+    boolean showArchivedSolo;
     boolean newProfile;
     boolean baseEdited;
     boolean keyEdited;
@@ -4171,36 +4257,30 @@ public class MainActivity extends Activity {
             }
         }), fullWidth());
 
+        java.util.List<JSONObject> live = new java.util.ArrayList<>();
+        java.util.List<JSONObject> archived = new java.util.ArrayList<>();
         for (int i = 0; i < list.length(); i += 1) {
-            final JSONObject item = list.optJSONObject(i);
+            JSONObject item = list.optJSONObject(i);
             if (item == null) continue;
-            final String id = item.optString("id");
-            String title = SoloStore.titleOf(item);
-            JSONArray messages = item.optJSONArray("messages");
-            int count = messages == null ? 0 : messages.length();
-            View row = pageRow(title, count + " 条消息", new Runnable() {
-                public void run() {
-                    soloOpen = id;
-                    prefs.edit().putString("soloOpen", id).apply();
-                    showSoloChat();
-                }
-            });
-            row.setOnLongClickListener(new View.OnLongClickListener() {
-                @Override
-                public boolean onLongClick(View v) {
-                    destructiveConfirm("删掉这条对话？", "只删本地记录", "删除", new Runnable() {
-                        @Override
+            if (item.optBoolean("archived", false)) archived.add(item); else live.add(item);
+        }
+        for (int i = 0; i < live.size(); i += 1) {
+            body.addView(soloRow(live.get(i)), fullWidth());
+        }
+        if (!archived.isEmpty()) {
+            body.addView(pageRow("已归档 · " + archived.size(),
+                    showArchivedSolo ? "点一下收起" : "点一下展开", new Runnable() {
                         public void run() {
-                            SoloStore.removeSession(prefs, id);
+                            showArchivedSolo = !showArchivedSolo;
                             showSoloSessions();
                         }
-                    });
-                    return true;
+                    }), fullWidth());
+            if (showArchivedSolo) {
+                for (int i = 0; i < archived.size(); i += 1) {
+                    body.addView(soloRow(archived.get(i)), fullWidth());
                 }
-            });
-            body.addView(row, fullWidth());
+            }
         }
-
         if (list.length() == 0) {
             TextView empty = text("还没有对话。点上面的＋新对话开始。", 9, C_MUTED, false);
             empty.setPadding(dp(10), dp(6), dp(10), 0);
@@ -4215,6 +4295,55 @@ public class MainActivity extends Activity {
         navDirection = 0;
         showScreen(page);
         soloRootPage = page;
+    }
+
+    /** One chat row: tap opens it, hold slides it aside for 归档 / 删除. */
+    View soloRow(final JSONObject item) {
+        final String id = item.optString("id");
+        final boolean archived = item.optBoolean("archived", false);
+        JSONArray messages = item.optJSONArray("messages");
+        int count = messages == null ? 0 : messages.length();
+        final SlideRow[] holder = new SlideRow[1];
+        View content = pageRow(SoloStore.titleOf(item),
+                (archived ? "已归档 · " : "") + count + " 条消息", new Runnable() {
+                    public void run() {
+                        if (holder[0] != null && holder[0].opened) {
+                            holder[0].close();
+                            return;
+                        }
+                        soloOpen = id;
+                        prefs.edit().putString("soloOpen", id).apply();
+                        showSoloChat();
+                    }
+                }, new Runnable() {
+                    public void run() {
+                        if (holder[0] != null) holder[0].toggle();
+                    }
+                });
+        SlideRow row = new SlideRow(content,
+                new String[]{archived ? "取消归档" : "归档", "删除"},
+                new int[]{C_CARD_HI, 0xFFE5484D},
+                new Runnable[]{
+                        new Runnable() {
+                            public void run() {
+                                SoloStore.setArchived(prefs, id, !archived);
+                                showSoloSessions();
+                            }
+                        },
+                        new Runnable() {
+                            public void run() {
+                                destructiveConfirm("删掉这条对话？", "只删本地记录", "删除",
+                                        new Runnable() {
+                                            public void run() {
+                                                SoloStore.removeSession(prefs, id);
+                                                showSoloSessions();
+                                            }
+                                        });
+                            }
+                        }
+                });
+        holder[0] = row;
+        return row;
     }
 
     JSONObject openSession() {
@@ -4337,7 +4466,7 @@ public class MainActivity extends Activity {
         final JSONArray messages = session == null ? null : session.optJSONArray("messages");
         int count = messages == null ? 0 : messages.length();
         if (count == 0) {
-            TextView empty = text("问点什么吧。表上的工具：时间、计算器、记事本、读写文件。",
+            TextView empty = text("问点什么吧。表上的工具：时间、计算器、记事本、文件、剪贴板、通知、搜索、闹钟、息屏、点屏。",
                     9, C_MUTED, false);
             empty.setPadding(dp(4), dp(8), dp(4), 0);
             soloLog.addView(empty, fullWidth());
