@@ -1525,10 +1525,7 @@ public class MainActivity extends Activity {
                 if (now - aboutTapAt > 700) aboutTaps = 0;
                 aboutTapAt = now;
                 aboutTaps += 1;
-                if (aboutTaps < 5) {
-                    if (aboutTaps >= 3) toast("再点 " + (5 - aboutTaps) + " 下");
-                    return;
-                }
+                if (aboutTaps < 5) return;
                 aboutTaps = 0;
                 showDeviceInfo();
             }
