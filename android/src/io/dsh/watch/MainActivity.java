@@ -5035,19 +5035,55 @@ public class MainActivity extends Activity {
     /** Strip our UI-only keys before sending history to the API. */
     JSONArray messageForApi(JSONArray messages) {
         JSONArray sent = new JSONArray();
+        java.util.Set<String> openCalls = new java.util.HashSet<>();
         for (int i = 0; messages != null && i < messages.length(); i += 1) {
             JSONObject item = messages.optJSONObject(i);
             if (item == null) continue;
             String role = item.optString("role");
-            String content = item.optString("content");
-            if ("assistant".equals(role) && content.isEmpty()) continue;
+            String content = item.optString("content", "");
+            JSONArray calls = item.optJSONArray("tool_calls");
+
+            if ("assistant".equals(role)) {
+                // A turn that only called tools has no text; dropping it used to
+                // leave the tool results orphaned and the API answered 400.
+                if (content.isEmpty() && (calls == null || calls.length() == 0)) continue;
+                openCalls.clear();
+                try {
+                    JSONObject out = new JSONObject();
+                    out.put("role", "assistant");
+                    out.put("content", content);
+                    if (calls != null) {
+                        out.put("tool_calls", calls);
+                        for (int c = 0; c < calls.length(); c += 1) {
+                            JSONObject call = calls.optJSONObject(c);
+                            if (call != null) openCalls.add(call.optString("id"));
+                        }
+                    }
+                    sent.put(out);
+                } catch (Exception ignored) {
+                }
+                continue;
+            }
+
+            if ("tool".equals(role)) {
+                // Only keep results that answer a call we actually sent.
+                String id = item.optString("tool_call_id");
+                if (id.isEmpty() || !openCalls.contains(id)) continue;
+                try {
+                    JSONObject out = new JSONObject();
+                    out.put("role", "tool");
+                    out.put("tool_call_id", id);
+                    out.put("content", content);
+                    sent.put(out);
+                } catch (Exception ignored) {
+                }
+                continue;
+            }
+
             try {
                 JSONObject out = new JSONObject();
                 out.put("role", role);
                 out.put("content", content);
-                JSONArray calls = item.optJSONArray("tool_calls");
-                if (calls != null) out.put("tool_calls", calls);
-                if (item.has("tool_call_id")) out.put("tool_call_id", item.optString("tool_call_id"));
                 sent.put(out);
             } catch (Exception ignored) {
             }
