@@ -4889,9 +4889,12 @@ public class MainActivity extends Activity {
         String reasoning = "";
         java.util.List<JSONObject> toolCards = new ArrayList<>();
         HttpURLConnection conn = null;
+        int replyIndex = -1;
         try {
             JSONArray messages = session.optJSONArray("messages");
-            messageForApi(messages);
+            // The reply bubble is the last message right now; tool traffic gets
+            // appended after it, so remember where it is.
+            replyIndex = messages.length() - 1;
 
             for (int round = 0; round < 5; round += 1) {
                 if (soloCancelled) break;
@@ -5001,6 +5004,7 @@ public class MainActivity extends Activity {
         }
 
         final String failed = error;
+        final int replyAt = replyIndex;
         final String text = answer;
         final String think = reasoning;
         final java.util.List<JSONObject> cards = toolCards;
@@ -5010,8 +5014,7 @@ public class MainActivity extends Activity {
                 soloBusy = false;
                 eventSolo("");
                 JSONArray messages = session.optJSONArray("messages");
-                int last = messages == null ? -1 : messages.length() - 1;
-                JSONObject tail = last >= 0 ? messages.optJSONObject(last) : null;
+                JSONObject tail = messages == null ? null : messages.optJSONObject(replyAt);
                 try {
                     if (tail != null) {
                         if (failed != null) {
@@ -5019,6 +5022,9 @@ public class MainActivity extends Activity {
                         } else if (!text.isEmpty()) {
                             tail.put("content", text);
                             if (!think.isEmpty()) tail.put("reason", think);
+                            tail.put("tools", new JSONArray(cards.toString()));
+                        } else if (cards != null && !cards.isEmpty()) {
+                            tail.put("content", "（工具跑完了，模型没有继续说话）");
                             tail.put("tools", new JSONArray(cards.toString()));
                         } else {
                             tail.put("content", "（没有内容返回）");
