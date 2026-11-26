@@ -1517,6 +1517,22 @@ public class MainActivity extends Activity {
         LinearLayout iconRow = row();
         iconRow.setGravity(Gravity.CENTER);
         iconRow.setPadding(0, dp(6), 0, dp(4));
+        iconRow.setClickable(true);
+        iconRow.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                long now = System.currentTimeMillis();
+                if (now - aboutTapAt > 700) aboutTaps = 0;
+                aboutTapAt = now;
+                aboutTaps += 1;
+                if (aboutTaps < 5) {
+                    if (aboutTaps >= 3) toast("再点 " + (5 - aboutTaps) + " 下");
+                    return;
+                }
+                aboutTaps = 0;
+                showDeviceInfo();
+            }
+        });
         iconRow.addView(icon, lp(dp(54), dp(54), 0, 0, 0, 0));
         body.addView(iconRow, fullWidth());
 
@@ -1555,6 +1571,67 @@ public class MainActivity extends Activity {
         body.addView(repo, fullWidth());
         scrollInto(page, body);
         readingDetail = false;
+        go(page);
+    }
+
+    String deviceInfoText() {
+        StringBuilder out = new StringBuilder();
+        out.append("设备  ").append(android.os.Build.MANUFACTURER).append(' ')
+                .append(android.os.Build.MODEL).append('\n');
+        out.append("系统  Android ").append(android.os.Build.VERSION.RELEASE)
+                .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
+        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+        out.append("屏幕  ").append(metrics.widthPixels).append('×').append(metrics.heightPixels)
+                .append(" · ").append(metrics.densityDpi).append("dpi\n");
+        String version = "?";
+        int code = 0;
+        try {
+            android.content.pm.PackageInfo info = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0);
+            version = info.versionName;
+            code = info.versionCode;
+        } catch (Exception ignored) {
+        }
+        out.append("应用  ").append(version).append(" (").append(code).append(")\n");
+        out.append("包名  ").append(getPackageName()).append("\n");
+        String[] abis = android.os.Build.SUPPORTED_ABIS;
+        out.append("架构  ").append(abis != null && abis.length > 0 ? abis[0] : "?").append('\n');
+        Runtime runtime = Runtime.getRuntime();
+        long used = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024);
+        long max = runtime.maxMemory() / (1024 * 1024);
+        out.append("内存  ").append(used).append(" / ").append(max).append(" MB\n");
+        long up = android.os.SystemClock.elapsedRealtime() / 1000;
+        out.append("开机  ").append(up / 3600).append(" 小时 ")
+                .append((up % 3600) / 60).append(" 分钟\n");
+        out.append("模式  ").append("solo".equals(mode) ? "独立使用" : "连接 DSH").append('\n');
+        out.append("主机  ").append("solo".equals(mode) ? shortHost(soloBase())
+                : shortHost(baseUrl == null ? "" : baseUrl)).append('\n');
+        out.append("无障碍  ").append(WatchAcc.status()).append('\n');
+        out.append("pid  ").append(android.os.Process.myPid());
+        return out.toString();
+    }
+
+    void showDeviceInfo() {
+        LinearLayout page = secondary("设备信息");
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(2), 0, dp(10));
+
+        TextView info = text(deviceInfoText(), 9, C_TEXT, false);
+        info.setLineSpacing(dp(3), 1f);
+        info.setPadding(dp(10), dp(4), dp(10), dp(8));
+        body.addView(info, fullWidth());
+
+        Button exit = smallButton("退出开发者界面", C_CARD);
+        exit.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                goBack();
+            }
+        });
+        body.addView(exit, lp(-1, dp(30), 0, dp(6), 0, 0));
+
+        scrollInto(page, body);
         go(page);
     }
 
@@ -4139,6 +4216,8 @@ public class MainActivity extends Activity {
     TextView soloStatus;
     TextView soloEvent;
     View soloRootPage;
+    int aboutTaps;
+    long aboutTapAt;
     boolean showArchivedSolo;
     boolean newProfile;
     boolean baseEdited;
